@@ -22,8 +22,7 @@ const (
 type Point struct {
 	x, y float32
 	flags int
-	h uint16 // 0-360
-	s, v uint8 // 0-255
+	h, s, v uint16 // 0-360, 0-255, 0-255
 }
 
 const (
@@ -36,8 +35,31 @@ const (
 var runningMutex sync.Mutex
 
 // r, g, b = rgb(frac[i].h, frac[i].s, frac[i].v)
-func rgb(h uint16, s, v uint8) (r, g, b uint8) {
-	r, g, b = 255, 0, 0
+func rgb(h, s, v uint16) (r, g, b uint16) {
+	h = (h + 720) % 360
+	q := h/60
+	hp := h % 60
+	c := s * v / 255
+	m := v - c
+	x := c * hp / 60
+	if (q & 1) != 0 {
+		x = c - x
+	}
+	switch q {
+	case 0:
+		r, g, b = c, x, 0
+	case 1:
+		r, g, b = x, c, 0
+	case 2:
+		r, g, b = 0, c, x
+	case 3:
+		r, g, b = 0, x, c
+	case 4:
+		r, g, b = x, 0, c
+	case 5:
+		r, g, b = c, 0, x
+	}
+	r, g, b = r + m, g + m, b + m
 	return
 }
 
@@ -47,10 +69,11 @@ func run() int {
 	var err error
 	frac := []Point{
 	  Point{ 1.0/3, 0, 0, 0, 255, 255 },
-	  Point{ .5, .5, 0, 0, 255, 255 },
-	  Point{ 2.0/3, 0, 0, 120, 255, 255 },
+	  Point{ .5, .5, 0, 80, 255, 255 },
+	  Point{ 2.0/3, 0, 0, 160, 255, 255 },
 	  Point{ 1, 0, 0, 240, 255, 255 },
 	}
+	offset := uint16(0)
 
 	sdl.Do(func() {
 		window, err = sdl.CreateWindow(WindowTitle, sdl.WINDOWPOS_UNDEFINED, sdl.WINDOWPOS_UNDEFINED, WindowWidth, WindowHeight, sdl.WINDOW_OPENGL)
@@ -84,6 +107,7 @@ func run() int {
 
 	running := true
 	for running {
+		offset = (offset + 1) % 360
 		sdl.Do(func() {
 			for event := sdl.PollEvent(); event != nil; event = sdl.PollEvent() {
 				switch event.(type) {
@@ -104,8 +128,8 @@ func run() int {
 		prev := Point{}
 		sdl.Do(func() {
 			for i := range frac {
-				r, g, b := rgb(frac[i].h, frac[i].s, frac[i].v)
-				renderer.SetDrawColor(r, g, b, 0xff)
+				r, g, b := rgb(frac[i].h + offset, frac[i].s, frac[i].v)
+				renderer.SetDrawColor(uint8(r), uint8(g), uint8(b), 0xff)
 				x0, y0 := (int)(prev.x * 800) + 200, (int)(prev.y * 400) + 400
 				prev = frac[i]
 				x1, y1 := (int)(frac[i].x * 800) + 200, (int)(frac[i].y * 400) + 400
