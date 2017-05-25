@@ -7,6 +7,7 @@ import (
 	"math"
 
 	"github.com/veandco/go-sdl2/sdl"
+	"github.com/veandco/go-sdl2/sdl_gfx"
 )
 
 // flags
@@ -177,12 +178,11 @@ func run() int {
 	var renderer *sdl.Renderer
 	var err error
 	base := []Point{
-	  Point{ 1.0/3, 0, 0, 0, 255, 255 },
-	  Point{ .5, .5, 0, 10, 255, 255 },
-	  Point{ 2.0/3, 0, 0, 20, 255, 255 },
+	  Point{ 0.05, 0.25, 0, 0, 255, 255 },
+	  Point{ 0.95, -0.25, 0, 20, 255, 255 },
 	  Point{ 1, 0, 0, 30, 255, 255 },
 	}
-	frac := NewFractal(base, 8)
+	frac := NewFractal(base, 10)
 	for i := 0; i < frac.MaxDepth; i++ {
 		if !frac.Render(i) {
 			fmt.Printf("oops, render %d failed.\n", i)
@@ -246,15 +246,14 @@ func run() int {
 				for j := 0; j < len(points); j++ {
 					p := points[j]
 					r, g, b := rgb(p.H, p.S, p.V)
-					renderer.SetDrawColor(uint8(r), uint8(g), uint8(b), 0xff)
-					x0, y0 := (int)(prev.X * 800) + 200, (int)(prev.Y * -400) + 400
+					x0, y0 := (int)(prev.X * 800) + 200, (int)(prev.Y * -800) + 400
 					prev = p
-					x1, y1 := (int)(p.X * 800) + 200, (int)(p.Y * -400) + 400
-					renderer.DrawLine(x0, y0, x1, y1)
+					x1, y1 := (int)(p.X * 800) + 200, (int)(p.Y * -800) + 400
+					gfx.AALineColor(renderer, x0, y0, x1, y1, sdl.Color{uint8(r), uint8(g), uint8(b), 255})
 				}
 			}
-			frac.Base[0].Y -= .001
-			frac.Base[2].Y += .001
+			frac.Base[0].Y += .0001
+			frac.Base[1].Y -= .0001
 			for i := 0; i < frac.MaxDepth; i++ {
 				if !frac.Render(i) {
 					fmt.Printf("oops, render %d failed.\n", i)
