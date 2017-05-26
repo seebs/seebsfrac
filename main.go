@@ -135,12 +135,16 @@ func (f *Fractal) Partial(p0 Point, p1 Point, dest []Point) {
 	}
 }
 
+type wininfo struct {
+	Title string
+	Width, Height int
+}
+
 const (
-	WindowTitle = "Frac"
-	WindowWidth = 1200
-	WindowHeight = 800
 	FrameRate = 30
 )
+
+var MainWinInfo = wininfo { Title: "Frac", Width: 1200, Height: 800 }
 
 var runningMutex sync.Mutex
 
@@ -177,10 +181,13 @@ func run() int {
 	var window *sdl.Window
 	var renderer *sdl.Renderer
 	var err error
+	fracPort := sdl.Rect { 200, 0, 1200, 800 }
+	// dataPort := sdl.Rect { 0, 0, 200, 800 }
+	fullPort := sdl.Rect { 0, 0, 1200, 800 }
 	base := []Point{
-	  Point{ 0.05, 0.25, 0, 0, 255, 255 },
-	  Point{ 0.95, -0.25, 0, 20, 255, 255 },
-	  Point{ 1, 0, 0, 30, 255, 255 },
+		Point{ 0.05, 0.25, 0, 0, 255, 255 },
+		Point{ 0.95, -0.25, 0, 20, 255, 255 },
+		Point{ 1, 0, 0, 30, 255, 255 },
 	}
 	frac := NewFractal(base, 10)
 	for i := 0; i < frac.MaxDepth; i++ {
@@ -190,7 +197,7 @@ func run() int {
 	}
 
 	sdl.Do(func() {
-		window, err = sdl.CreateWindow(WindowTitle, sdl.WINDOWPOS_UNDEFINED, sdl.WINDOWPOS_UNDEFINED, WindowWidth, WindowHeight, sdl.WINDOW_OPENGL)
+		window, err = sdl.CreateWindow(MainWinInfo.Title, sdl.WINDOWPOS_UNDEFINED, sdl.WINDOWPOS_UNDEFINED, MainWinInfo.Width, MainWinInfo.Height, sdl.WINDOW_OPENGL)
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to create window: %s\n", err)
@@ -234,12 +241,14 @@ func run() int {
 
 			renderer.Clear()
 			renderer.SetDrawColor(0, 0, 0, 0x20)
-			renderer.FillRect(&sdl.Rect{0, 0, WindowWidth, WindowHeight})
+			renderer.SetViewport(nil)
+			renderer.FillRect(&fullPort)
 		})
 
 		// Do expensive stuff using goroutines
 		wg := sync.WaitGroup{}
 		sdl.Do(func() {
+			renderer.SetViewport(&fracPort)
 			for i := 1; i <= frac.Depth; i++ {
 				points := frac.Points(i)
 				prev := ZeroPoint
