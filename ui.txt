@@ -1,0 +1,24 @@
+                   |
+Points: N   -|+	   |
+Depth: N    -|+	   |
+Total: xxxxxxx     |
+                   |
+Point: N    -|+    |
+X: N.NNNNNNN       |
+Y: N.NNNNNNN       |
+                   |				RENDER HERE
+H: NNN -|+  F/A    |
+S: NNN -|+  F/A    |
+V: NNN -|+  F/A    |
+                   |
+Flip X: []         |
+Flip Y: []         |
+Hide: []           |
+Prune: []          |
+                   |
+                   |
+                   |
+                   |
+                   |
+                   |
+                   |

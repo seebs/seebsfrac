@@ -5,14 +5,17 @@ import (
 	"os"
 	"sync"
 	"math"
+	"log"
+	"runtime/pprof"
 
 	"github.com/veandco/go-sdl2/sdl"
 	"github.com/veandco/go-sdl2/sdl_gfx"
+	"github.com/veandco/go-sdl2/sdl_ttf"
 )
 
 // flags
 const (
-  Invisible = 1 << iota
+  Hide = 1 << iota
   Prune
   FlipX
   FlipY
@@ -20,6 +23,31 @@ const (
   FixedS
   FixedV
 )
+
+type Coord struct {
+	X, Y float64
+}
+
+type Rect struct {
+	C0, C1 Coord
+}
+
+func (r Rect) GoString() string {
+	return fmt.Sprintf("[%.4f, %.4f], [%.4f, %.4f]",
+		r.C0.X, r.C0.Y, r.C1.X, r.C1.Y)
+}
+
+func (r Rect) Scales() (x, y float64) {
+	dx, dy := r.C1.X - r.C0.X, r.C1.Y - r.C0.Y
+	// arbitrarily attempt to avoid division by zero
+	if dx == 0 {
+		dx = -1
+	}
+	if dy == 0 {
+		dy = -1
+	}
+	return math.Sqrt(dx * dx), math.Sqrt(dy * dy)
+}
 
 type Point struct {
 	X, Y float64
@@ -43,6 +71,66 @@ type Fractal struct {
 	Base []Point
 	data []Point
 	lines [][]Point
+}
+
+type Affine struct {
+	// x1 x2 x0
+	// y1 y2 y0
+	// [0 0 1]
+	X0, X1, X2, Y0, Y1, Y2 float64
+}
+
+func (a Affine) GoString() string {
+	return fmt.Sprintf("[ %.4f %.4f %.4f ]\n[ %.4f %.4f %.4f ]",
+		a.X1, a.X2, a.X0, a.Y1, a.Y2, a.Y0)
+}
+
+func (a Affine) apply(x, y float64) (rx, ry float64) {
+	rx = a.X1 * x + a.X2 * y + a.X0
+	ry = a.Y1 * x + a.Y2 * y + a.Y0
+	return
+}
+
+func (a Affine) applyInt(x, y float64) (rx, ry int) {
+	rx = int(a.X1 * x + a.X2 * y + a.X0)
+	ry = int(a.Y1 * x + a.Y2 * y + a.Y0)
+	return
+}
+
+func NewAffineBetween(p0, p1 Point) Affine {
+	a := Affine { X0: p0.X, Y0: p0.Y }
+	dx, dy := p1.X - p0.X, p1.Y - p0.Y
+	scale := math.Sqrt(dx * dx + dy * dy)
+	theta := math.Atan2(dy, dx)
+	cost := math.Cos(theta)
+	sint := math.Sin(theta)
+	// x1 x2 x0   x   x'
+	// y1 y2 y0 * y = y'
+	// 0  0  1    1   1
+	a.X1, a.Y1, a.X2, a.Y2 = scale * cost, scale * sint, -scale * sint, scale * cost
+	return a
+}
+
+func NewAffinesBetween(r0, r1 Rect) (to, from Affine) {
+	sx0, sy0 := r0.Scales()
+	sx1, sy1 := r1.Scales()
+	to = Affine { X0: r1.C0.X - (r0.C0.X * sx1), Y0: r1.C0.Y - (r0.C0.Y * sy1), X1: sx1 / sx0, Y2: sy1 / sy0 }
+	from = Affine { X0: r0.C0.X - (r1.C0.X * sx0), Y0: r0.C0.Y - (r1.C0.Y * sy0), X1: sx0 / sx1, Y2: sy0 / sy1 }
+	// fmt.Println("affines for:")
+	// fmt.Printf("%#v =>\n", r0)
+	// fmt.Printf("%#v\n", r1)
+	// fmt.Println("to:")
+	// fmt.Printf("%#v\n", to)
+
+	return
+}
+
+func NewAffineTo(sx, sy, ox, oy float64) Affine {
+	return Affine { X0: ox, Y0: oy, X1: sx, Y2: sy }
+}
+
+func NewAffineFrom(sx, sy, ox, oy float64) Affine {
+	return Affine { X0: -ox, Y0: -oy, X1: 1/sx, Y2: 1/sy }
 }
 
 func NewFractal(base []Point, max int) *Fractal {
@@ -114,20 +202,11 @@ func (f *Fractal) Render(depth int) bool {
 }
 
 func (f *Fractal) Partial(p0 Point, p1 Point, dest []Point) {
-	dx, dy := p1.X - p0.X, p1.Y - p0.Y
-	scale := math.Sqrt(dx * dx + dy * dy)
-	theta := math.Atan2(dy, dx)
-	cost := math.Cos(theta)
-	sint := math.Sin(theta)
-	// x1 x2 x0   x   x'
-	// y1 y2 y0 * y = y'
-	// 0  0  1    1   1
-	x1, y1, x2, y2 := scale * cost, scale * sint, -scale * sint, scale * cost
+	a := NewAffineBetween(p0, p1)
 
 	for i := 0; i < len(f.Base); i++ {
 		p := f.Base[i]
-		dest[i].X = x1 * p.X + x2 * p.Y + p0.X
-	        dest[i].Y = y1 * p.X + y2 * p.Y + p0.Y
+		dest[i].X, dest[i].Y = a.apply(p.X, p.Y)
 		dest[i].H = (p.H + p1.H) % 360
 		dest[i].S = p.S
 		dest[i].V = p.V
@@ -179,11 +258,24 @@ func rgb(h, s, v uint16) (r, g, b uint16) {
 
 func run() int {
 	var window *sdl.Window
+	var font *ttf.Font
 	var renderer *sdl.Renderer
 	var err error
-	fracPort := sdl.Rect { 200, 0, 1200, 800 }
-	// dataPort := sdl.Rect { 0, 0, 200, 800 }
+	selectedPoint := -1
+
+	f, err := os.Create("pdata")
+	if err != nil {
+		log.Fatal(err)
+	}
+	pprof.StartCPUProfile(f)
+	defer pprof.StopCPUProfile()
+
+	fracPort := sdl.Rect { 200, 0, 1000, 800 }
 	fullPort := sdl.Rect { 0, 0, 1200, 800 }
+	dataPort := sdl.Rect { 0, 0, 200, 800 }
+	fracRect := Rect { C0: Coord { -.125, -.5 }, C1: Coord { 1.125, .5 } }
+	fracPortRect := Rect { C0: Coord { 0, 0 }, C1: Coord { 1000, 800 } }
+	toScreen, fromScreen := NewAffinesBetween(fracRect, fracPortRect)
 	base := []Point{
 		Point{ 0.05, 0.25, 0, 0, 255, 255 },
 		Point{ 0.95, -0.25, 0, 20, 255, 255 },
@@ -196,8 +288,21 @@ func run() int {
 		}
 	}
 
+	if err := ttf.Init(); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to initialize TTF: %s\n", err)
+		return 1
+	}
+
+	if font, err = ttf.OpenFont("Go-Mono.ttf", 32); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to open font: %s\n", err)
+		return 4
+	}
+
+	defer font.Close()
+
 	sdl.Do(func() {
 		window, err = sdl.CreateWindow(MainWinInfo.Title, sdl.WINDOWPOS_UNDEFINED, sdl.WINDOWPOS_UNDEFINED, MainWinInfo.Width, MainWinInfo.Height, sdl.WINDOW_OPENGL)
+
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to create window: %s\n", err)
@@ -212,8 +317,9 @@ func run() int {
 	sdl.Do(func() {
 		renderer, err = sdl.CreateRenderer(window, -1, sdl.RENDERER_ACCELERATED)
 	})
+
 	if err != nil {
-		fmt.Fprint(os.Stderr, "Failed to create renderer: %s\n", err)
+		fmt.Fprintf(os.Stderr, "Failed to create renderer: %s\n", err)
 		return 2
 	}
 	defer func() {
@@ -223,43 +329,80 @@ func run() int {
 	}()
 
 	sdl.Do(func() {
+		var blended *sdl.Surface
+		var texture *sdl.Texture
+		var err error
+
 		renderer.Clear()
+		renderer.SetViewport(&dataPort)
+		if blended, err = font.RenderUTF8_Blended("foo", sdl.Color{255, 255, 255, 255}); err != nil {
+			fmt.Fprintf(os.Stderr, "blended text error: %s\n", err)
+			return
+		}
+		texture, err = renderer.CreateTextureFromSurface(blended)
+		blended.Free()
+		renderer.Copy(texture, nil, &sdl.Rect{0, 0, 200, 20})
+		texture.Destroy()
+		
 	})
 
 	running := true
 	for running {
-		// offset = (offset + 1) % 360
 		sdl.Do(func() {
 			for event := sdl.PollEvent(); event != nil; event = sdl.PollEvent() {
-				switch event.(type) {
+				switch e := event.(type) {
 				case *sdl.QuitEvent:
 					runningMutex.Lock()
 					running = false
 					runningMutex.Unlock()
+				case *sdl.MouseButtonEvent:
+					if e.Button == 1 && e.State == sdl.PRESSED {
+						x, y := fromScreen.apply(float64(e.X - fracPort.X), float64(e.Y - fracPort.Y))
+						fmt.Printf("%d, %d => %f, %f\n",
+							e.X, e.Y, x, y)
+						selectedPoint++
+						if selectedPoint >= len(frac.Base) {
+							selectedPoint = -1
+						}
+					}
 				}
 			}
 
-			renderer.Clear()
-			renderer.SetDrawColor(0, 0, 0, 0x20)
 			renderer.SetViewport(nil)
-			renderer.FillRect(&fullPort)
 		})
 
 		// Do expensive stuff using goroutines
-		wg := sync.WaitGroup{}
 		sdl.Do(func() {
+			renderer.SetViewport(&fullPort)
+			renderer.SetDrawBlendMode(sdl.BLENDMODE_NONE)
+			renderer.SetDrawColor(0, 0, 0, 0xFF)
+			renderer.FillRect(&fracPort)
+			renderer.SetDrawBlendMode(sdl.BLENDMODE_ADD)
 			renderer.SetViewport(&fracPort)
 			for i := 1; i <= frac.Depth; i++ {
 				points := frac.Points(i)
-				prev := ZeroPoint
+				x0, y0 := toScreen.applyInt(ZeroPoint.X, ZeroPoint.Y)
 				for j := 0; j < len(points); j++ {
 					p := points[j]
 					r, g, b := rgb(p.H, p.S, p.V)
-					x0, y0 := (int)(prev.X * 800) + 200, (int)(prev.Y * -800) + 400
-					prev = p
-					x1, y1 := (int)(p.X * 800) + 200, (int)(p.Y * -800) + 400
-					gfx.AALineColor(renderer, x0, y0, x1, y1, sdl.Color{uint8(r), uint8(g), uint8(b), 255})
+					x1, y1 := toScreen.applyInt(p.X, p.Y)
+					// gfx.AALineColor(renderer, x0, y0, x1, y1, sdl.Color{uint8(r), uint8(g), uint8(b), 255})
+					renderer.SetDrawColor(uint8(r), uint8(g), uint8(b), 255)
+					renderer.DrawLine(x0, y0, x1, y1)
+					x0, y0 = x1, y1
 				}
+			}
+			if selectedPoint >= 0 {
+				pts := frac.Points(1)
+				p1 := pts[selectedPoint]
+				r, g, b := rgb(p1.H, p1.S, p1.V)
+				var p0 Point
+				if selectedPoint > 0 {
+					p0 = pts[selectedPoint - 1]
+				}
+				x0, y0 := toScreen.applyInt(p0.X, p0.Y)
+				x1, y1 := toScreen.applyInt(p1.X, p1.Y)
+				gfx.ThickLineColor(renderer, x0, y0, x1, y1, 3, sdl.Color{uint8(r), uint8(g), uint8(b), 255})
 			}
 			frac.Base[0].Y += .0001
 			frac.Base[1].Y -= .0001
@@ -269,7 +412,6 @@ func run() int {
 				}
 			}
 		})
-		wg.Wait()
 
 		sdl.Do(func() {
 			renderer.Present()
