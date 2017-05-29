@@ -10,7 +10,6 @@ import (
 
 	"github.com/veandco/go-sdl2/sdl"
 	"github.com/veandco/go-sdl2/sdl_gfx"
-	"github.com/veandco/go-sdl2/sdl_ttf"
 )
 
 // flags
@@ -258,8 +257,8 @@ func rgb(h, s, v uint16) (r, g, b uint16) {
 
 func run() int {
 	var window *sdl.Window
-	var font *ttf.Font
 	var renderer *sdl.Renderer
+	var lab *Field
 	var err error
 	selectedPoint := -1
 
@@ -288,17 +287,6 @@ func run() int {
 		}
 	}
 
-	if err := ttf.Init(); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to initialize TTF: %s\n", err)
-		return 1
-	}
-
-	if font, err = ttf.OpenFont("Go-Mono.ttf", 32); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to open font: %s\n", err)
-		return 4
-	}
-
-	defer font.Close()
 
 	sdl.Do(func() {
 		window, err = sdl.CreateWindow(MainWinInfo.Title, sdl.WINDOWPOS_UNDEFINED, sdl.WINDOWPOS_UNDEFINED, MainWinInfo.Width, MainWinInfo.Height, sdl.WINDOW_OPENGL)
@@ -322,6 +310,17 @@ func run() int {
 		fmt.Fprintf(os.Stderr, "Failed to create renderer: %s\n", err)
 		return 2
 	}
+
+	sdl.Do(func() {
+		UIInit(renderer)
+	})
+
+	defer func() {
+		sdl.Do(func() {
+			UIClose()
+		})
+	}()
+
 	defer func() {
 		sdl.Do(func() {
 			renderer.Destroy()
@@ -329,22 +328,14 @@ func run() int {
 	}()
 
 	sdl.Do(func() {
-		var blended *sdl.Surface
-		var texture *sdl.Texture
-		var err error
-
-		renderer.Clear()
-		renderer.SetViewport(&dataPort)
-		if blended, err = font.RenderUTF8_Blended("foo", sdl.Color{255, 255, 255, 255}); err != nil {
-			fmt.Fprintf(os.Stderr, "blended text error: %s\n", err)
-			return
-		}
-		texture, err = renderer.CreateTextureFromSurface(blended)
-		blended.Free()
-		renderer.Copy(texture, nil, &sdl.Rect{0, 0, 200, 20})
-		texture.Destroy()
-		
+		lab = NewField("label:", "%.3f", 100, 255, 255)
 	})
+
+	defer func() {
+		sdl.Do(func() {
+			lab.Close()
+		})
+	}()
 
 	running := true
 	for running {
@@ -376,7 +367,7 @@ func run() int {
 			renderer.SetViewport(&fullPort)
 			renderer.SetDrawBlendMode(sdl.BLENDMODE_NONE)
 			renderer.SetDrawColor(0, 0, 0, 0xFF)
-			renderer.FillRect(&fracPort)
+			renderer.FillRect(&fullPort)
 			renderer.SetDrawBlendMode(sdl.BLENDMODE_ADD)
 			renderer.SetViewport(&fracPort)
 			for i := 1; i <= frac.Depth; i++ {
@@ -411,6 +402,10 @@ func run() int {
 					fmt.Printf("oops, render %d failed.\n", i)
 				}
 			}
+			renderer.SetViewport(&dataPort)
+			renderer.SetDrawBlendMode(sdl.BLENDMODE_BLEND)
+			lab.SetValue(frac.Base[0].Y)
+			lab.Draw()
 		})
 
 		sdl.Do(func() {
