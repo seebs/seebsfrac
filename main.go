@@ -256,9 +256,10 @@ func rgb(h, s, v uint16) (r, g, b uint16) {
 }
 
 func run() int {
+	var u *UI
 	var window *sdl.Window
 	var renderer *sdl.Renderer
-	var lab *Field
+	var lab map[string]*Field
 	var err error
 	selectedPoint := -1
 
@@ -312,12 +313,12 @@ func run() int {
 	}
 
 	sdl.Do(func() {
-		UIInit(renderer)
+		u = NewUI(renderer)
 	})
 
 	defer func() {
 		sdl.Do(func() {
-			UIClose()
+			u.Close()
 		})
 	}()
 
@@ -327,15 +328,12 @@ func run() int {
 		})
 	}()
 
+	lab = make(map[string]*Field)
 	sdl.Do(func() {
-		lab = NewField("label:", "%.3f", 100, 255, 255)
+		lab["x"] = u.NewField("X:", 5, 5, "%.3f", 100, 255, 255)
+		lab["x"].SetActive(false)
+		lab["y"] = u.NewField("Y:", 5, 25, "%.3f", 100, 255, 255)
 	})
-
-	defer func() {
-		sdl.Do(func() {
-			lab.Close()
-		})
-	}()
 
 	running := true
 	for running {
@@ -404,8 +402,8 @@ func run() int {
 			}
 			renderer.SetViewport(&dataPort)
 			renderer.SetDrawBlendMode(sdl.BLENDMODE_BLEND)
-			lab.SetValue(frac.Base[0].Y)
-			lab.Draw()
+			lab["y"].SetValue(frac.Base[0].Y)
+			u.Draw()
 		})
 
 		sdl.Do(func() {

@@ -8,35 +8,41 @@ import (
 	"github.com/veandco/go-sdl2/sdl_ttf"
 )
 
-var font *ttf.Font
-var renderer *sdl.Renderer
-
 type Glyph struct {
+	ui *UI
 	surface *sdl.Surface
 	texture *sdl.Texture
 	w, h int32
 }
 
 type Field struct {
-	Glyph
+	ui *UI
+	label Glyph
 	fmt string
+	active bool
+	labeltext string
 	value float64
 	x, y int32
-	r, g, b uint8
+	lr, lg, lb uint8
+	vr, vg, vb uint8
 }
 
-var foo Field
+type UI struct {
+	font *ttf.Font
+	renderer *sdl.Renderer
+	characters [128]*Glyph
+	fields []*Field
+}
 
-var characters [128]*Glyph
-
-func NewGlyph(label string) *Glyph {
+func (u UI) NewGlyph(label string) *Glyph {
 	var err error
 	var gl Glyph
-	if gl.surface, err = font.RenderUTF8_Blended(label, sdl.Color{255, 255, 255, 255}); err != nil {
+	gl.ui = &u
+	if gl.surface, err = u.font.RenderUTF8_Blended(label, sdl.Color{255, 255, 255, 255}); err != nil {
 		fmt.Fprintf(os.Stderr, "blended text error: %s\n", err)
 		return nil
 	}
-	if gl.texture, err = renderer.CreateTextureFromSurface(gl.surface); err != nil {
+	if gl.texture, err = u.renderer.CreateTextureFromSurface(gl.surface); err != nil {
 		fmt.Fprintf(os.Stderr, "texture creation error: %s\n", err)
 		return nil
 	}
@@ -46,20 +52,23 @@ func NewGlyph(label string) *Glyph {
 
 func (gl Glyph) Draw(x, y int32, r, g, b uint8) int32 {
 	gl.texture.SetColorMod(r, g, b)
-	renderer.Copy(gl.texture, nil, &sdl.Rect{x, y, gl.w, gl.h})
+	gl.ui.renderer.Copy(gl.texture, nil, &sdl.Rect{x, y, gl.w, gl.h})
 	return gl.w
 }
 
-func NewField(label string, fmt string, r, g, b uint8) *Field {
+func (u *UI) NewField(label string, x, y int32, fmt string, r, g, b uint8) *Field {
 	var f Field
+	f.labeltext = label
+	f.ui = u
+	f.x, f.y = x, y
 	f.fmt = fmt
-	f.r, f.g, f.b = r, g, b
-	glyph := NewGlyph(label)
+	f.lr, f.lg, f.lb = r, g, b
+	f.vr, f.vg, f.vb = r, g, b
+	glyph := u.NewGlyph(label)
 	if glyph != nil {
-		f.Glyph = *glyph
+		f.label = *glyph
 	}
-	f.texture.SetColorMod(f.r, f.g, f.b)
-	foo = f
+	u.fields = append(u.fields, &f)
 	return &f
 }
 
@@ -69,21 +78,29 @@ func (g Glyph) Close() {
 }
 
 func (f Field) Close() {
-	f.Glyph.Close()
+	f.label.Close()
 }
 
 func (f *Field) SetValue(v float64) {
 	f.value = v
+	f.active = true
+}
+
+func (f *Field) SetActive(b bool) {
+	f.active = b
+}
+
+func (f *Field) SetLabelColor(r, g, b uint8) {
+	f.lr, f.lg, f.lb = r, g, b
+}
+
+func (f *Field) SetValueColor(r, g, b uint8) {
+	f.vr, f.vg, f.vb = r, g, b
 }
 
 func (f Field) DrawValue() {
 	digits := fmt.Sprintf(f.fmt, f.value)
-	DrawString(f.x + f.w + 5, f.y, digits, f.r, f.g, f.b)
-}
-
-func (f Field) DrawValueColor(r, g, b uint8) {
-	digits := fmt.Sprintf(f.fmt, f.value)
-	DrawString(f.x + f.w + 5, f.y, digits, r, g, b)
+	f.ui.DrawString(f.x + f.label.w + 5, f.y, digits, f.vr, f.vg, f.vb)
 }
 
 func (f Field) Move(x, y int32) {
@@ -92,51 +109,61 @@ func (f Field) Move(x, y int32) {
 
 func (f Field) Draw() {
 	f.DrawLabel()
-	f.DrawValue()
+	if f.active {
+		f.DrawValue()
+	}
+}
+
+func (u UI) Draw() {
+	for _, f := range(u.fields) {
+		f.Draw()
+	}
 }
 
 func (f Field) DrawLabel() {
-	f.Glyph.Draw(f.x, f.y, f.r, f.g, f.b)
+	f.label.Draw(f.x, f.y, f.lr, f.lg, f.lb)
 }
 
-func (f Field) DrawLabelColor(r, g, b uint8) {
-	f.Glyph.Draw(f.x, f.y, r, g, b)
-}
-
-func DrawString(x, y int32, s string, r, g, b uint8) {
+func (u UI) DrawString(x, y int32, s string, r, g, b uint8) {
 	for _, c := range s {
 		var dx int32
 		i := int(c)
-		if i >= 0 && i < len(characters) && characters[i] != nil {
-			dx = characters[c].Draw(x, y, r, g, b)
+		if i >= 0 && i < len(u.characters) && u.characters[i] != nil {
+			dx = u.characters[c].Draw(x, y, r, g, b)
 			x += dx
 		}
 	}
 }
 
-func UIInit(r *sdl.Renderer) {
+func NewUI(r *sdl.Renderer) *UI {
+	var u UI
 	var err error
-	renderer = r
+	u.renderer = r
+	u.fields = make([]*Field, 0)
 
 	if err = ttf.Init(); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to initialize TTF: %s\n", err)
 	}
 
-	if font, err = ttf.OpenFont("Go-Mono.ttf", 16); err != nil {
+	if u.font, err = ttf.OpenFont("Go-Mono.ttf", 16); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to open font: %s\n", err)
 	}
 
-	for i := 32; i < len(characters); i++ {
-		characters[i] = NewGlyph(fmt.Sprintf("%c", i))
+	for i := 32; i < len(u.characters); i++ {
+		u.characters[i] = u.NewGlyph(fmt.Sprintf("%c", i))
 	}
+	return &u
 }
 
-func UIClose() {
-	for i := 32; i < len(characters); i++ {
-		if characters[i] != nil {
-			characters[i].Close()
-			characters[i] = nil
+func (u *UI) Close() {
+	for i := 32; i < len(u.characters); i++ {
+		if u.characters[i] != nil {
+			u.characters[i].Close()
+			u.characters[i] = nil
 		}
 	}
-	font.Close()
+	for _, f := range(u.fields) {
+		f.Close()
+	}
+	u.font.Close()
 }
