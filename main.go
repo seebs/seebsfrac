@@ -72,6 +72,15 @@ type Fractal struct {
 	lines [][]Point
 }
 
+// indicate that we have to redraw
+func (f *Fractal) Changed() {
+	f.Depth = 0
+	f.Render(1)
+	f.Render(2)
+	f.Render(3)
+	f.Render(4)
+}
+
 type Affine struct {
 	// x1 x2 x0
 	// y1 y2 y0
@@ -175,7 +184,7 @@ func (f *Fractal) Render(depth int) bool {
 	if depth == 0 {
 		return true
 	}
-	if depth > 0 && depth <= f.MaxDepth {
+	if depth > 0 && depth < f.MaxDepth {
 		src = f.Points(depth - 1)
 	}
 	if src == nil {
@@ -255,13 +264,40 @@ func rgb(h, s, v uint16) (r, g, b uint16) {
 	return
 }
 
+var selectedPoint = -1
+var lab map[string]*Field
+var frac *Fractal
+
+func selectPoint(p int) {
+	if p >= 0 && p < len(frac.Base) {
+		selectedPoint = p
+	} else {
+		selectedPoint = -1
+		lab["point"].SetActive(false)
+		lab["x"].SetActive(false)
+		lab["y"].SetActive(false)
+	}
+}
+
+func updateValues() {
+	if selectedPoint >= 0 {
+		p := frac.Base[selectedPoint]
+		lab["point"].SetValue(float64(selectedPoint))
+		lab["x"].SetValue(p.X)
+		lab["y"].SetValue(p.Y)
+	}
+}
+
+func dist(x0, y0, x1, y1 float64) float64 {
+	dx, dy := x1 - x0, y1 - y0
+	return math.Sqrt(dx * dx + dy * dy)
+}
+
 func run() int {
 	var u *UI
 	var window *sdl.Window
 	var renderer *sdl.Renderer
-	var lab map[string]*Field
 	var err error
-	selectedPoint := -1
 
 	f, err := os.Create("pdata")
 	if err != nil {
@@ -275,13 +311,17 @@ func run() int {
 	dataPort := sdl.Rect { 0, 0, 200, 800 }
 	fracRect := Rect { C0: Coord { -.125, -.5 }, C1: Coord { 1.125, .5 } }
 	fracPortRect := Rect { C0: Coord { 0, 0 }, C1: Coord { 1000, 800 } }
+	var mouseStart Coord
+	var pointStart Coord
+	var dragPoint int
+	var dragging bool
 	toScreen, fromScreen := NewAffinesBetween(fracRect, fracPortRect)
 	base := []Point{
 		Point{ 0.05, 0.25, 0, 0, 255, 255 },
 		Point{ 0.95, -0.25, 0, 20, 255, 255 },
 		Point{ 1, 0, 0, 30, 255, 255 },
 	}
-	frac := NewFractal(base, 10)
+	frac = NewFractal(base, 12)
 	for i := 0; i < frac.MaxDepth; i++ {
 		if !frac.Render(i) {
 			fmt.Printf("oops, render %d failed.\n", i)
@@ -330,9 +370,9 @@ func run() int {
 
 	lab = make(map[string]*Field)
 	sdl.Do(func() {
-		lab["x"] = u.NewField("X:", 5, 5, "%.3f", 100, 255, 255)
-		lab["x"].SetActive(false)
-		lab["y"] = u.NewField("Y:", 5, 25, "%.3f", 100, 255, 255)
+		lab["point"] = u.NewField("Point:", 5, 5, "%.0f", 100, 255, 255)
+		lab["x"] = u.NewField("X:", 5, 25, "%.3f", 100, 255, 255)
+		lab["y"] = u.NewField("Y:", 5, 45, "%.3f", 100, 255, 255)
 	})
 
 	running := true
@@ -345,23 +385,47 @@ func run() int {
 					running = false
 					runningMutex.Unlock()
 				case *sdl.MouseButtonEvent:
+					// assume click is in fracPort
+					e.X -= fracPort.X
+					e.Y -= fracPort.Y
 					if e.Button == 1 && e.State == sdl.PRESSED {
-						x, y := fromScreen.apply(float64(e.X - fracPort.X), float64(e.Y - fracPort.Y))
-						fmt.Printf("%d, %d => %f, %f\n",
-							e.X, e.Y, x, y)
-						selectedPoint++
-						if selectedPoint >= len(frac.Base) {
-							selectedPoint = -1
+						mouseStart.X, mouseStart.Y = fromScreen.apply(float64(e.X), float64(e.Y))
+						new := -1
+						for i, p := range(frac.Base) {
+							px, py := toScreen.apply(p.X, p.Y)
+							if dist(px, py, float64(e.X), float64(e.Y)) < 15 {
+								pointStart.X, pointStart.Y = p.X, p.Y
+								new = i
+								break
+							}
+						}
+						dragging = true
+						dragPoint = new
+						selectPoint(new)
+					} else if e.Button == 1 && e.State == sdl.RELEASED {
+						dragging = false
+					}
+				case *sdl.MouseMotionEvent:
+					if dragging {
+						e.X -= fracPort.X
+						e.Y -= fracPort.Y
+						// don't allow dragging last point
+						if dragPoint >= 0 && dragPoint < len(frac.Base) {
+							newX, newY := fromScreen.apply(float64(e.X), float64(e.Y))
+							frac.Base[dragPoint].X = newX - mouseStart.X + pointStart.X
+							frac.Base[dragPoint].Y = newY - mouseStart.Y + pointStart.Y
+							frac.Changed()
 						}
 					}
 				}
 			}
-
-			renderer.SetViewport(nil)
 		})
 
 		// Do expensive stuff using goroutines
 		sdl.Do(func() {
+			if frac.Depth < frac.MaxDepth - 1 {
+				frac.Render(frac.Depth + 1)
+			}
 			renderer.SetViewport(&fullPort)
 			renderer.SetDrawBlendMode(sdl.BLENDMODE_NONE)
 			renderer.SetDrawColor(0, 0, 0, 0xFF)
@@ -393,16 +457,9 @@ func run() int {
 				x1, y1 := toScreen.applyInt(p1.X, p1.Y)
 				gfx.ThickLineColor(renderer, x0, y0, x1, y1, 3, sdl.Color{uint8(r), uint8(g), uint8(b), 255})
 			}
-			frac.Base[0].Y += .0001
-			frac.Base[1].Y -= .0001
-			for i := 0; i < frac.MaxDepth; i++ {
-				if !frac.Render(i) {
-					fmt.Printf("oops, render %d failed.\n", i)
-				}
-			}
 			renderer.SetViewport(&dataPort)
 			renderer.SetDrawBlendMode(sdl.BLENDMODE_BLEND)
-			lab["y"].SetValue(frac.Base[0].Y)
+			updateValues()
 			u.Draw()
 		})
 
