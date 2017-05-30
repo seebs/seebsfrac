@@ -2,11 +2,11 @@ package main
 
 import (
 	"fmt"
-	"os"
-	"sync"
-	"math"
 	"log"
+	"math"
+	"os"
 	"runtime/pprof"
+	"sync"
 
 	"github.com/veandco/go-sdl2/sdl"
 	"github.com/veandco/go-sdl2/sdl_gfx"
@@ -14,13 +14,13 @@ import (
 
 // flags
 const (
-  Hide = 1 << iota
-  Prune
-  FlipX
-  FlipY
-  FixedH
-  FixedS
-  FixedV
+	Hide = 1 << iota
+	Prune
+	FlipX
+	FlipY
+	FixedH
+	FixedS
+	FixedV
 )
 
 type Coord struct {
@@ -37,7 +37,7 @@ func (r Rect) GoString() string {
 }
 
 func (r Rect) Scales() (x, y float64) {
-	dx, dy := r.C1.X - r.C0.X, r.C1.Y - r.C0.Y
+	dx, dy := r.C1.X-r.C0.X, r.C1.Y-r.C0.Y
 	// arbitrarily attempt to avoid division by zero
 	if dx == 0 {
 		dx = -1
@@ -49,8 +49,8 @@ func (r Rect) Scales() (x, y float64) {
 }
 
 type Point struct {
-	X, Y float64
-	Flags int
+	X, Y    float64
+	Flags   int
 	H, S, V uint16 // 0-360, 0-255, 0-255
 }
 
@@ -59,18 +59,18 @@ func (p Point) GoString() string {
 }
 
 var (
-	ZeroPoint = Point { X: 0, Y: 0 }
-	UnitLine = []Point { Point { X: 1, Y: 0 } }
+	ZeroPoint = Point{X: 0, Y: 0}
+	UnitLine  = []Point{Point{X: 1, Y: 0}}
 )
 
 type Fractal struct {
 	dataSize int
 	MaxDepth int
-	Depth int
-	Base []Point
-	data []Point
-	lines [][]Point
-	H, S, V uint16 // 0-360, 0-255, 0-255
+	Depth    int
+	Base     []Point
+	data     []Point
+	lines    [][]Point
+	H, S, V  uint16 // 0-360, 0-255, 0-255
 }
 
 // indicate that we have to redraw
@@ -85,7 +85,7 @@ func (f *Fractal) Changed() {
 func (f *Fractal) Bounds() (r Rect) {
 	r.C0.X, r.C0.Y, r.C1.X, r.C1.Y = 0, 0, 1, 0
 	for i := 0; i <= f.Depth; i++ {
-		for _, p := range(f.lines[i]) {
+		for _, p := range f.lines[i] {
 			if p.X < r.C0.X {
 				r.C0.X = p.X
 			} else if p.X > r.C1.X {
@@ -105,12 +105,12 @@ func (f *Fractal) AdjustedBounds(r0 Rect) (r Rect) {
 	portRatio := (r0.C1.X - r0.C0.X) / (r0.C1.Y - r0.C0.Y)
 	r = f.Bounds()
 	// fmt.Printf("%#v\n", r)
-	sx, sy := r.C1.X - r.C0.X, r.C1.Y - r.C0.Y
+	sx, sy := r.C1.X-r.C0.X, r.C1.Y-r.C0.Y
 	if sy < .001 {
 		sy = .001
 	}
 	var dx, dy float64
-	if sy == 0 || (sx / sy) > portRatio {
+	if sy == 0 || (sx/sy) > portRatio {
 		dy = (sx / portRatio) - sy
 		r.C0.Y -= dy / 2
 		r.C1.Y += dy / 2
@@ -136,36 +136,36 @@ func (a Affine) GoString() string {
 }
 
 func (a Affine) Apply(x, y float64) (rx, ry float64) {
-	rx = a.X1 * x + a.X2 * y + a.X0
-	ry = a.Y1 * x + a.Y2 * y + a.Y0
+	rx = a.X1*x + a.X2*y + a.X0
+	ry = a.Y1*x + a.Y2*y + a.Y0
 	return
 }
 
 func (a Affine) ApplyInt(x, y float64) (rx, ry int) {
-	rx = int(a.X1 * x + a.X2 * y + a.X0)
-	ry = int(a.Y1 * x + a.Y2 * y + a.Y0)
+	rx = int(a.X1*x + a.X2*y + a.X0)
+	ry = int(a.Y1*x + a.Y2*y + a.Y0)
 	return
 }
 
 func NewAffineBetween(p0, p1 Point) Affine {
-	a := Affine { X0: p0.X, Y0: p0.Y }
-	dx, dy := p1.X - p0.X, p1.Y - p0.Y
-	scale := math.Sqrt(dx * dx + dy * dy)
+	a := Affine{X0: p0.X, Y0: p0.Y}
+	dx, dy := p1.X-p0.X, p1.Y-p0.Y
+	scale := math.Sqrt(dx*dx + dy*dy)
 	theta := math.Atan2(dy, dx)
 	cost := math.Cos(theta)
 	sint := math.Sin(theta)
 	// x1 x2 x0   x   x'
 	// y1 y2 y0 * y = y'
 	// 0  0  1    1   1
-	a.X1, a.Y1, a.X2, a.Y2 = scale * cost, scale * sint, -scale * sint, scale * cost
+	a.X1, a.Y1, a.X2, a.Y2 = scale*cost, scale*sint, -scale*sint, scale*cost
 	return a
 }
 
 func NewAffinesBetween(r0, r1 Rect) (to, from Affine) {
 	sx0, sy0 := r0.Scales()
 	sx1, sy1 := r1.Scales()
-	to = Affine { X0: r1.C0.X - (r0.C0.X * sx1 / sx0), Y0: r1.C0.Y - (r0.C0.Y * sy1 / sy0), X1: sx1 / sx0, Y2: sy1 / sy0 }
-	from = Affine { X0: r0.C0.X - (r1.C0.X * sx0 / sx1), Y0: r0.C0.Y - (r1.C0.Y * sy0 / sy1), X1: sx0 / sx1, Y2: sy0 / sy1 }
+	to = Affine{X0: r1.C0.X - (r0.C0.X * sx1 / sx0), Y0: r1.C0.Y - (r0.C0.Y * sy1 / sy0), X1: sx1 / sx0, Y2: sy1 / sy0}
+	from = Affine{X0: r0.C0.X - (r1.C0.X * sx0 / sx1), Y0: r0.C0.Y - (r1.C0.Y * sy0 / sy1), X1: sx0 / sx1, Y2: sy0 / sy1}
 	// fmt.Println("affines for:")
 	// fmt.Printf("%#v =>\n", r0)
 	// fmt.Printf("%#v\n", r1)
@@ -176,11 +176,11 @@ func NewAffinesBetween(r0, r1 Rect) (to, from Affine) {
 }
 
 func NewAffineTo(sx, sy, ox, oy float64) Affine {
-	return Affine { X0: ox, Y0: oy, X1: sx, Y2: sy }
+	return Affine{X0: ox, Y0: oy, X1: sx, Y2: sy}
 }
 
 func NewAffineFrom(sx, sy, ox, oy float64) Affine {
-	return Affine { X0: -ox, Y0: -oy, X1: 1/sx, Y2: 1/sy }
+	return Affine{X0: -ox, Y0: -oy, X1: 1 / sx, Y2: 1 / sy}
 }
 
 func (f *Fractal) Alloc() {
@@ -192,7 +192,7 @@ func (f *Fractal) Alloc() {
 		totals[i] = total
 		size *= len(f.Base)
 		// cap maxdepth
-		if total + size > 100000 {
+		if total+size > 100000 {
 			f.MaxDepth = i + 1
 		}
 	}
@@ -224,10 +224,10 @@ func (f *Fractal) AddPoint(beforePoint int) {
 	if len(f.Base) >= 6 || beforePoint < 0 || beforePoint > len(f.Base) {
 		return
 	}
-	newbase := make([]Point, len(f.Base) + 1)
+	newbase := make([]Point, len(f.Base)+1)
 	j := 0
 	prev := Point{}
-	for i, p := range(f.Base) { 
+	for i, p := range f.Base {
 		if i == beforePoint {
 			newPoint := p
 			newPoint.X = (p.X + prev.X) / 2
@@ -249,9 +249,9 @@ func (f *Fractal) DelPoint(point int) {
 	if len(f.Base) < 2 || point < 0 || point > len(f.Base) {
 		return
 	}
-	newbase := make([]Point, len(f.Base) - 1)
+	newbase := make([]Point, len(f.Base)-1)
 	j := 0
-	for i, p := range(f.Base) { 
+	for i, p := range f.Base {
 		if i != point {
 			newbase[j] = p
 			j++
@@ -290,9 +290,9 @@ func (f *Fractal) Render(depth int) bool {
 	// fmt.Printf("render depth %d (src %d, dest %d points)\n", depth, len(src), cap(dest))
 
 	prev := ZeroPoint
-	for p := range(src) {
+	for p := range src {
 		// fmt.Printf("rendering partial %d [%d:%d]\n", p, offset, offset + l)
-		f.Partial(prev, src[p], dest[offset:offset + l])
+		f.Partial(prev, src[p], dest[offset:offset+l])
 		prev = src[p]
 		offset += l
 	}
@@ -316,7 +316,7 @@ func (f *Fractal) Partial(p0 Point, p1 Point, dest []Point) {
 }
 
 type wininfo struct {
-	Title string
+	Title         string
 	Width, Height int
 }
 
@@ -324,14 +324,14 @@ const (
 	FrameRate = 30
 )
 
-var MainWinInfo = wininfo { Title: "Frac", Width: 1200, Height: 800 }
+var MainWinInfo = wininfo{Title: "Frac", Width: 1200, Height: 800}
 
 var runningMutex sync.Mutex
 
 // r, g, b = rgb(frac[i].h, frac[i].s, frac[i].v)
 func rgb(h, s, v uint16) (r, g, b uint16) {
 	h = (h + 720) % 360
-	q := h/60
+	q := h / 60
 	hp := h % 60
 	c := s * v / 255
 	m := v - c
@@ -353,7 +353,7 @@ func rgb(h, s, v uint16) (r, g, b uint16) {
 	case 5:
 		r, g, b = c, 0, x
 	}
-	r, g, b = r + m, g + m, b + m
+	r, g, b = r+m, g+m, b+m
 	return
 }
 
@@ -382,8 +382,8 @@ func updateValues() {
 }
 
 func dist(x0, y0, x1, y1 float64) float64 {
-	dx, dy := x1 - x0, y1 - y0
-	return math.Sqrt(dx * dx + dy * dy)
+	dx, dy := x1-x0, y1-y0
+	return math.Sqrt(dx*dx + dy*dy)
 }
 
 func run() int {
@@ -399,18 +399,18 @@ func run() int {
 	pprof.StartCPUProfile(f)
 	defer pprof.StopCPUProfile()
 
-	fracPort := sdl.Rect { 200, 0, 1000, 800 }
-	fullPort := sdl.Rect { 0, 0, 1200, 800 }
-	dataPort := sdl.Rect { 0, 0, 200, 800 }
-	fracPortRect := Rect { C0: Coord { 5, 5 }, C1: Coord { 995, 795 } }
+	fracPort := sdl.Rect{200, 0, 1000, 800}
+	fullPort := sdl.Rect{0, 0, 1200, 800}
+	dataPort := sdl.Rect{0, 0, 200, 800}
+	fracPortRect := Rect{C0: Coord{5, 5}, C1: Coord{995, 795}}
 	var mouseStart Coord
 	var pointStart Coord
 	var dragPoint int
 	var dragging bool
 	base := []Point{
-		Point{ 0.05, 0.25, 0, 0, 255, 255 },
-		Point{ 0.95, -0.25, 0, 0, 255, 255 },
-		Point{ 1, 0, 0, 0, 255, 255 },
+		Point{0.05, 0.25, 0, 0, 255, 255},
+		Point{0.95, -0.25, 0, 0, 255, 255},
+		Point{1, 0, 0, 0, 255, 255},
 	}
 	frac = NewFractal(base, 12)
 	frac.H = 30
@@ -421,7 +421,6 @@ func run() int {
 	}
 	fracRect := frac.AdjustedBounds(fracPortRect)
 	toScreen, fromScreen := NewAffinesBetween(fracRect, fracPortRect)
-
 
 	sdl.Do(func() {
 		window, err = sdl.CreateWindow(MainWinInfo.Title, sdl.WINDOWPOS_UNDEFINED, sdl.WINDOWPOS_UNDEFINED, MainWinInfo.Width, MainWinInfo.Height, sdl.WINDOW_OPENGL)
@@ -475,7 +474,6 @@ func run() int {
 		})
 	})
 
-
 	running := true
 	for running {
 		sdl.Do(func() {
@@ -502,7 +500,7 @@ func run() int {
 					if e.Button == 1 && e.State == sdl.PRESSED {
 						mouseStart.X, mouseStart.Y = fromScreen.Apply(float64(e.X), float64(e.Y))
 						new := -1
-						for i, p := range(frac.Base) {
+						for i, p := range frac.Base {
 							px, py := toScreen.Apply(p.X, p.Y)
 							if dist(px, py, float64(e.X), float64(e.Y)) < 15 {
 								pointStart.X, pointStart.Y = p.X, p.Y
@@ -523,7 +521,7 @@ func run() int {
 						e.X -= fracPort.X
 						e.Y -= fracPort.Y
 						// don't allow dragging last point
-						if dragPoint >= 0 && dragPoint < len(frac.Base) - 1 {
+						if dragPoint >= 0 && dragPoint < len(frac.Base)-1 {
 							newX, newY := fromScreen.Apply(float64(e.X), float64(e.Y))
 							frac.Base[dragPoint].X = newX - mouseStart.X + pointStart.X
 							frac.Base[dragPoint].Y = newY - mouseStart.Y + pointStart.Y
@@ -536,7 +534,7 @@ func run() int {
 
 		// Do expensive stuff using goroutines
 		sdl.Do(func() {
-			if frac.Depth < frac.MaxDepth - 1 {
+			if frac.Depth < frac.MaxDepth-1 {
 				frac.Render(frac.Depth + 1)
 			}
 			renderer.SetViewport(&fullPort)
@@ -564,7 +562,7 @@ func run() int {
 				r, g, b := rgb(p1.H, p1.S, p1.V)
 				var p0 Point
 				if selectedPoint > 0 {
-					p0 = pts[selectedPoint - 1]
+					p0 = pts[selectedPoint-1]
 				}
 				x0, y0 := toScreen.ApplyInt(p0.X, p0.Y)
 				x1, y1 := toScreen.ApplyInt(p1.X, p1.Y)

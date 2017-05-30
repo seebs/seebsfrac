@@ -9,20 +9,20 @@ import (
 )
 
 type Glyph struct {
-	ui *UI
+	ui      *UI
 	surface *sdl.Surface
 	texture *sdl.Texture
-	w, h int32
+	w, h    int32
 }
 
 type Field struct {
-	ui *UI
-	label Glyph
-	fmt string
-	active bool
-	labeltext string
-	value float64
-	x, y int32
+	ui         *UI
+	label      Glyph
+	fmt        string
+	active     bool
+	labeltext  string
+	value      float64
+	x, y       int32
 	lr, lg, lb uint8
 	vr, vg, vb uint8
 }
@@ -34,12 +34,12 @@ type Drawable interface {
 }
 
 type Button struct {
-	ui *UI
-	x, y int32
-	label Glyph
+	ui        *UI
+	x, y      int32
+	label     Glyph
 	labeltext string
-	callback func()
-	r, g, b uint8
+	callback  func()
+	r, g, b   uint8
 }
 
 func (b *Button) Close() {
@@ -66,8 +66,8 @@ func (u *UI) NewButton(label string, x, y int32, r, g, b uint8, callback func())
 }
 
 func (b *Button) IsClicked(x, y int32) bool {
-	if x >= b.x && x <= b.x + b.label.w &&
-	   y >= b.y && y <= b.y + b.label.h {
+	if x >= b.x && x <= b.x+b.label.w &&
+		y >= b.y && y <= b.y+b.label.h {
 		b.callback()
 		return true
 	}
@@ -79,10 +79,10 @@ func (f *Field) IsClicked(x, y int32) bool {
 }
 
 type UI struct {
-	font *ttf.Font
-	renderer *sdl.Renderer
+	font       *ttf.Font
+	renderer   *sdl.Renderer
 	characters [128]*Glyph
-	fields []Drawable
+	fields     []Drawable
 }
 
 func (u UI) NewGlyph(label string) *Glyph {
@@ -151,7 +151,7 @@ func (f *Field) SetValueColor(r, g, b uint8) {
 
 func (f *Field) DrawValue() {
 	digits := fmt.Sprintf(f.fmt, f.value)
-	f.ui.DrawString(f.x + f.label.w + 5, f.y, digits, f.vr, f.vg, f.vb)
+	f.ui.DrawString(f.x+f.label.w+5, f.y, digits, f.vr, f.vg, f.vb)
 }
 
 func (f *Field) Move(x, y int32) {
@@ -166,7 +166,7 @@ func (f *Field) Draw() {
 }
 
 func (u UI) Draw() {
-	for _, f := range(u.fields) {
+	for _, f := range u.fields {
 		f.Draw()
 	}
 }
@@ -207,7 +207,7 @@ func NewUI(r *sdl.Renderer) *UI {
 }
 
 func (u *UI) IsClicked(x, y int32) bool {
-	for _, f := range(u.fields) {
+	for _, f := range u.fields {
 		if f.IsClicked(x, y) {
 			return true
 		}
@@ -222,7 +222,7 @@ func (u *UI) Close() {
 			u.characters[i] = nil
 		}
 	}
-	for _, f := range(u.fields) {
+	for _, f := range u.fields {
 		f.Close()
 	}
 	u.font.Close()
