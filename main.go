@@ -141,18 +141,18 @@ func NewAffineFrom(sx, sy, ox, oy float64) Affine {
 	return Affine { X0: -ox, Y0: -oy, X1: 1/sx, Y2: 1/sy }
 }
 
-func NewFractal(base []Point, max int) *Fractal {
-	f := new(Fractal)
-	f.Base = base[:]
-	f.MaxDepth = max
-	f.Depth = 0
+func (f *Fractal) Alloc() {
 	totals := make([]int, f.MaxDepth)
 	total := 0
 	size := 1
-	for i := 0; i < max; i++ {
+	for i := 0; i < f.MaxDepth; i++ {
 		total += size
 		totals[i] = total
 		size *= len(f.Base)
+		// cap maxdepth
+		if total + size > 100000 {
+			f.MaxDepth = i + 1
+		}
 	}
 	f.data = make([]Point, total, total)
 	// first line is trivial case: it has one point after 0,0, which is 1,0
@@ -160,12 +160,63 @@ func NewFractal(base []Point, max int) *Fractal {
 	f.lines = make([][]Point, f.MaxDepth)
 	prev := 0
 	fmt.Printf("%d points, %d depth, %d total size.\n", len(f.Base), f.MaxDepth, total)
-	for i := 0; i < max; i++ {
+	for i := 0; i < f.MaxDepth; i++ {
 		fmt.Printf("depth %d: %d to %d\n", i, prev, totals[i])
 		f.lines[i] = f.data[prev:totals[i]]
 		prev = totals[i]
 	}
+	f.Changed()
+}
+
+func NewFractal(base []Point, max int) *Fractal {
+	f := new(Fractal)
+	f.Base = base[:]
+	f.MaxDepth = max
+	f.Depth = 0
+	f.Alloc()
 	return f
+}
+
+func (f *Fractal) AddPoint(beforePoint int) {
+	// cap size
+	if len(f.Base) >= 6 || beforePoint < 0 || beforePoint > len(f.Base) {
+		return
+	}
+	newbase := make([]Point, len(f.Base) + 1)
+	j := 0
+	prev := Point{}
+	for i, p := range(f.Base) { 
+		if i == beforePoint {
+			newPoint := p
+			newPoint.X = (p.X + prev.X) / 2
+			newPoint.Y = (p.Y + prev.Y) / 2
+			newbase[j] = newPoint
+			fmt.Printf("New point[%d]: %.3f, %.3f\n", j, p.X, p.Y)
+			j++
+		}
+		newbase[j] = p
+		j++
+		prev = p
+	}
+	f.Base = newbase
+	f.Alloc()
+}
+
+func (f *Fractal) DelPoint(point int) {
+	// cap size
+	if len(f.Base) < 2 || point < 0 || point > len(f.Base) {
+		return
+	}
+	newbase := make([]Point, len(f.Base) - 1)
+	j := 0
+	for i, p := range(f.Base) { 
+		if i != point {
+			newbase[j] = p
+			j++
+		}
+	}
+	f.Base = newbase
+	f.Alloc()
 }
 
 func (f *Fractal) Points(depth int) []Point {
@@ -373,7 +424,14 @@ func run() int {
 		lab["point"] = u.NewField("Point:", 5, 5, "%.0f", 100, 255, 255)
 		lab["x"] = u.NewField("X:", 5, 25, "%.3f", 100, 255, 255)
 		lab["y"] = u.NewField("Y:", 5, 45, "%.3f", 100, 255, 255)
+		u.NewButton("Add", 15, 60, 100, 255, 100, func() {
+			frac.AddPoint(selectedPoint)
+		})
+		u.NewButton("Del", 85, 60, 100, 255, 100, func() {
+			frac.DelPoint(selectedPoint)
+		})
 	})
+
 
 	running := true
 	for running {
@@ -386,6 +444,16 @@ func run() int {
 					runningMutex.Unlock()
 				case *sdl.MouseButtonEvent:
 					// assume click is in fracPort
+					if e.X <= fracPort.X {
+						if e.Button == 1 && e.State == sdl.RELEASED {
+							if u.IsClicked(e.X, e.Y) {
+								fmt.Println("Clicked a thing!")
+							} else {
+								fmt.Println("Clicked no thing!")
+							}
+						}
+						break
+					}
 					e.X -= fracPort.X
 					e.Y -= fracPort.Y
 					if e.Button == 1 && e.State == sdl.PRESSED {
@@ -410,7 +478,7 @@ func run() int {
 						e.X -= fracPort.X
 						e.Y -= fracPort.Y
 						// don't allow dragging last point
-						if dragPoint >= 0 && dragPoint < len(frac.Base) {
+						if dragPoint >= 0 && dragPoint < len(frac.Base) - 1 {
 							newX, newY := fromScreen.apply(float64(e.X), float64(e.Y))
 							frac.Base[dragPoint].X = newX - mouseStart.X + pointStart.X
 							frac.Base[dragPoint].Y = newY - mouseStart.Y + pointStart.Y

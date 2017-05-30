@@ -27,11 +27,62 @@ type Field struct {
 	vr, vg, vb uint8
 }
 
+type Drawable interface {
+	Draw()
+	Close()
+	IsClicked(x, y int32) bool
+}
+
+type Button struct {
+	ui *UI
+	x, y int32
+	label Glyph
+	labeltext string
+	callback func()
+	r, g, b uint8
+}
+
+func (b *Button) Close() {
+	b.label.Close()
+}
+
+func (b *Button) Draw() {
+	b.label.Draw(b.x, b.y, b.r, b.g, b.b)
+}
+
+func (u *UI) NewButton(label string, x, y int32, r, g, b uint8, callback func()) *Button {
+	var bt Button
+	bt.labeltext = label
+	bt.ui = u
+	bt.x, bt.y = x, y
+	bt.r, bt.g, bt.b = r, g, b
+	bt.callback = callback
+	glyph := u.NewGlyph(label)
+	if glyph != nil {
+		bt.label = *glyph
+	}
+	u.fields = append(u.fields, &bt)
+	return &bt
+}
+
+func (b *Button) IsClicked(x, y int32) bool {
+	if x >= b.x && x <= b.x + b.label.w &&
+	   y >= b.y && y <= b.y + b.label.h {
+		b.callback()
+		return true
+	}
+	return false
+}
+
+func (f *Field) IsClicked(x, y int32) bool {
+	return false
+}
+
 type UI struct {
 	font *ttf.Font
 	renderer *sdl.Renderer
 	characters [128]*Glyph
-	fields []*Field
+	fields []Drawable
 }
 
 func (u UI) NewGlyph(label string) *Glyph {
@@ -77,7 +128,7 @@ func (g Glyph) Close() {
 	g.surface.Free()
 }
 
-func (f Field) Close() {
+func (f *Field) Close() {
 	f.label.Close()
 }
 
@@ -98,16 +149,16 @@ func (f *Field) SetValueColor(r, g, b uint8) {
 	f.vr, f.vg, f.vb = r, g, b
 }
 
-func (f Field) DrawValue() {
+func (f *Field) DrawValue() {
 	digits := fmt.Sprintf(f.fmt, f.value)
 	f.ui.DrawString(f.x + f.label.w + 5, f.y, digits, f.vr, f.vg, f.vb)
 }
 
-func (f Field) Move(x, y int32) {
+func (f *Field) Move(x, y int32) {
 	f.x, f.y = x, y
 }
 
-func (f Field) Draw() {
+func (f *Field) Draw() {
 	f.DrawLabel()
 	if f.active {
 		f.DrawValue()
@@ -139,7 +190,7 @@ func NewUI(r *sdl.Renderer) *UI {
 	var u UI
 	var err error
 	u.renderer = r
-	u.fields = make([]*Field, 0)
+	u.fields = make([]Drawable, 0)
 
 	if err = ttf.Init(); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to initialize TTF: %s\n", err)
@@ -153,6 +204,15 @@ func NewUI(r *sdl.Renderer) *UI {
 		u.characters[i] = u.NewGlyph(fmt.Sprintf("%c", i))
 	}
 	return &u
+}
+
+func (u *UI) IsClicked(x, y int32) bool {
+	for _, f := range(u.fields) {
+		if f.IsClicked(x, y) {
+			return true
+		}
+	}
+	return false
 }
 
 func (u *UI) Close() {
