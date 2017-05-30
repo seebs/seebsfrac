@@ -45,7 +45,7 @@ func (r Rect) Scales() (x, y float64) {
 	if dy == 0 {
 		dy = -1
 	}
-	return math.Sqrt(dx * dx), math.Sqrt(dy * dy)
+	return math.Abs(dx), math.Abs(dy)
 }
 
 type Point struct {
@@ -70,6 +70,7 @@ type Fractal struct {
 	Base []Point
 	data []Point
 	lines [][]Point
+	H, S, V uint16 // 0-360, 0-255, 0-255
 }
 
 // indicate that we have to redraw
@@ -79,6 +80,47 @@ func (f *Fractal) Changed() {
 	f.Render(2)
 	f.Render(3)
 	f.Render(4)
+}
+
+func (f *Fractal) Bounds() (r Rect) {
+	r.C0.X, r.C0.Y, r.C1.X, r.C1.Y = 0, 0, 1, 0
+	for i := 0; i <= f.Depth; i++ {
+		for _, p := range(f.lines[i]) {
+			if p.X < r.C0.X {
+				r.C0.X = p.X
+			} else if p.X > r.C1.X {
+				r.C1.X = p.X
+			}
+			if p.Y < r.C0.Y {
+				r.C0.Y = p.Y
+			} else if p.Y > r.C1.Y {
+				r.C1.Y = p.Y
+			}
+		}
+	}
+	return
+}
+
+func (f *Fractal) AdjustedBounds(r0 Rect) (r Rect) {
+	portRatio := (r0.C1.X - r0.C0.X) / (r0.C1.Y - r0.C0.Y)
+	r = f.Bounds()
+	// fmt.Printf("%#v\n", r)
+	sx, sy := r.C1.X - r.C0.X, r.C1.Y - r.C0.Y
+	if sy < .001 {
+		sy = .001
+	}
+	var dx, dy float64
+	if sy == 0 || (sx / sy) > portRatio {
+		dy = (sx / portRatio) - sy
+		r.C0.Y -= dy / 2
+		r.C1.Y += dy / 2
+	} else {
+		dx = (sy * portRatio) - sx
+		r.C0.X -= dx / 2
+		r.C1.X += dx / 2
+	}
+	// fmt.Printf("adjusted [%.3f, %.3f, ratio %.2f vs. %.2f] %#v\n", sx, sy, sx / sy, portRatio, r)
+	return
 }
 
 type Affine struct {
@@ -93,13 +135,13 @@ func (a Affine) GoString() string {
 		a.X1, a.X2, a.X0, a.Y1, a.Y2, a.Y0)
 }
 
-func (a Affine) apply(x, y float64) (rx, ry float64) {
+func (a Affine) Apply(x, y float64) (rx, ry float64) {
 	rx = a.X1 * x + a.X2 * y + a.X0
 	ry = a.Y1 * x + a.Y2 * y + a.Y0
 	return
 }
 
-func (a Affine) applyInt(x, y float64) (rx, ry int) {
+func (a Affine) ApplyInt(x, y float64) (rx, ry int) {
 	rx = int(a.X1 * x + a.X2 * y + a.X0)
 	ry = int(a.Y1 * x + a.Y2 * y + a.Y0)
 	return
@@ -122,8 +164,8 @@ func NewAffineBetween(p0, p1 Point) Affine {
 func NewAffinesBetween(r0, r1 Rect) (to, from Affine) {
 	sx0, sy0 := r0.Scales()
 	sx1, sy1 := r1.Scales()
-	to = Affine { X0: r1.C0.X - (r0.C0.X * sx1), Y0: r1.C0.Y - (r0.C0.Y * sy1), X1: sx1 / sx0, Y2: sy1 / sy0 }
-	from = Affine { X0: r0.C0.X - (r1.C0.X * sx0), Y0: r0.C0.Y - (r1.C0.Y * sy0), X1: sx0 / sx1, Y2: sy0 / sy1 }
+	to = Affine { X0: r1.C0.X - (r0.C0.X * sx1 / sx0), Y0: r1.C0.Y - (r0.C0.Y * sy1 / sy0), X1: sx1 / sx0, Y2: sy1 / sy0 }
+	from = Affine { X0: r0.C0.X - (r1.C0.X * sx0 / sx1), Y0: r0.C0.Y - (r1.C0.Y * sy0 / sy1), X1: sx0 / sx1, Y2: sy0 / sy1 }
 	// fmt.Println("affines for:")
 	// fmt.Printf("%#v =>\n", r0)
 	// fmt.Printf("%#v\n", r1)
@@ -161,7 +203,7 @@ func (f *Fractal) Alloc() {
 	prev := 0
 	fmt.Printf("%d points, %d depth, %d total size.\n", len(f.Base), f.MaxDepth, total)
 	for i := 0; i < f.MaxDepth; i++ {
-		fmt.Printf("depth %d: %d to %d\n", i, prev, totals[i])
+		// fmt.Printf("depth %d: %d to %d\n", i, prev, totals[i])
 		f.lines[i] = f.data[prev:totals[i]]
 		prev = totals[i]
 	}
@@ -191,7 +233,7 @@ func (f *Fractal) AddPoint(beforePoint int) {
 			newPoint.X = (p.X + prev.X) / 2
 			newPoint.Y = (p.Y + prev.Y) / 2
 			newbase[j] = newPoint
-			fmt.Printf("New point[%d]: %.3f, %.3f\n", j, p.X, p.Y)
+			// fmt.Printf("New point[%d]: %.3f, %.3f\n", j, p.X, p.Y)
 			j++
 		}
 		newbase[j] = p
@@ -265,8 +307,8 @@ func (f *Fractal) Partial(p0 Point, p1 Point, dest []Point) {
 
 	for i := 0; i < len(f.Base); i++ {
 		p := f.Base[i]
-		dest[i].X, dest[i].Y = a.apply(p.X, p.Y)
-		dest[i].H = (p.H + p1.H) % 360
+		dest[i].X, dest[i].Y = a.Apply(p.X, p.Y)
+		dest[i].H = (p.H + p1.H + f.H) % 360
 		dest[i].S = p.S
 		dest[i].V = p.V
 		// fmt.Printf("... point %d: %v\n", i, dest[i])
@@ -360,24 +402,25 @@ func run() int {
 	fracPort := sdl.Rect { 200, 0, 1000, 800 }
 	fullPort := sdl.Rect { 0, 0, 1200, 800 }
 	dataPort := sdl.Rect { 0, 0, 200, 800 }
-	fracRect := Rect { C0: Coord { -.125, -.5 }, C1: Coord { 1.125, .5 } }
-	fracPortRect := Rect { C0: Coord { 0, 0 }, C1: Coord { 1000, 800 } }
+	fracPortRect := Rect { C0: Coord { 5, 5 }, C1: Coord { 995, 795 } }
 	var mouseStart Coord
 	var pointStart Coord
 	var dragPoint int
 	var dragging bool
-	toScreen, fromScreen := NewAffinesBetween(fracRect, fracPortRect)
 	base := []Point{
 		Point{ 0.05, 0.25, 0, 0, 255, 255 },
-		Point{ 0.95, -0.25, 0, 20, 255, 255 },
-		Point{ 1, 0, 0, 30, 255, 255 },
+		Point{ 0.95, -0.25, 0, 0, 255, 255 },
+		Point{ 1, 0, 0, 0, 255, 255 },
 	}
 	frac = NewFractal(base, 12)
+	frac.H = 30
 	for i := 0; i < frac.MaxDepth; i++ {
 		if !frac.Render(i) {
 			fmt.Printf("oops, render %d failed.\n", i)
 		}
 	}
+	fracRect := frac.AdjustedBounds(fracPortRect)
+	toScreen, fromScreen := NewAffinesBetween(fracRect, fracPortRect)
 
 
 	sdl.Do(func() {
@@ -457,10 +500,10 @@ func run() int {
 					e.X -= fracPort.X
 					e.Y -= fracPort.Y
 					if e.Button == 1 && e.State == sdl.PRESSED {
-						mouseStart.X, mouseStart.Y = fromScreen.apply(float64(e.X), float64(e.Y))
+						mouseStart.X, mouseStart.Y = fromScreen.Apply(float64(e.X), float64(e.Y))
 						new := -1
 						for i, p := range(frac.Base) {
-							px, py := toScreen.apply(p.X, p.Y)
+							px, py := toScreen.Apply(p.X, p.Y)
 							if dist(px, py, float64(e.X), float64(e.Y)) < 15 {
 								pointStart.X, pointStart.Y = p.X, p.Y
 								new = i
@@ -472,6 +515,8 @@ func run() int {
 						selectPoint(new)
 					} else if e.Button == 1 && e.State == sdl.RELEASED {
 						dragging = false
+						fracRect = frac.AdjustedBounds(fracPortRect)
+						toScreen, fromScreen = NewAffinesBetween(fracRect, fracPortRect)
 					}
 				case *sdl.MouseMotionEvent:
 					if dragging {
@@ -479,7 +524,7 @@ func run() int {
 						e.Y -= fracPort.Y
 						// don't allow dragging last point
 						if dragPoint >= 0 && dragPoint < len(frac.Base) - 1 {
-							newX, newY := fromScreen.apply(float64(e.X), float64(e.Y))
+							newX, newY := fromScreen.Apply(float64(e.X), float64(e.Y))
 							frac.Base[dragPoint].X = newX - mouseStart.X + pointStart.X
 							frac.Base[dragPoint].Y = newY - mouseStart.Y + pointStart.Y
 							frac.Changed()
@@ -502,11 +547,11 @@ func run() int {
 			renderer.SetViewport(&fracPort)
 			for i := 1; i <= frac.Depth; i++ {
 				points := frac.Points(i)
-				x0, y0 := toScreen.applyInt(ZeroPoint.X, ZeroPoint.Y)
+				x0, y0 := toScreen.ApplyInt(ZeroPoint.X, ZeroPoint.Y)
 				for j := 0; j < len(points); j++ {
 					p := points[j]
 					r, g, b := rgb(p.H, p.S, p.V)
-					x1, y1 := toScreen.applyInt(p.X, p.Y)
+					x1, y1 := toScreen.ApplyInt(p.X, p.Y)
 					// gfx.AALineColor(renderer, x0, y0, x1, y1, sdl.Color{uint8(r), uint8(g), uint8(b), 255})
 					renderer.SetDrawColor(uint8(r), uint8(g), uint8(b), 255)
 					renderer.DrawLine(x0, y0, x1, y1)
@@ -521,8 +566,8 @@ func run() int {
 				if selectedPoint > 0 {
 					p0 = pts[selectedPoint - 1]
 				}
-				x0, y0 := toScreen.applyInt(p0.X, p0.Y)
-				x1, y1 := toScreen.applyInt(p1.X, p1.Y)
+				x0, y0 := toScreen.ApplyInt(p0.X, p0.Y)
+				x1, y1 := toScreen.ApplyInt(p1.X, p1.Y)
 				gfx.ThickLineColor(renderer, x0, y0, x1, y1, 3, sdl.Color{uint8(r), uint8(g), uint8(b), 255})
 			}
 			renderer.SetViewport(&dataPort)
