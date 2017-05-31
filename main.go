@@ -101,7 +101,7 @@ func (f *Fractal) Bounds() (r Rect) {
 	return
 }
 
-func (f *Fractal) AdjustedBounds(r0 Rect) (r Rect) {
+func (f *Fractal) AdjustedBounds(r0 Rect, scale int32) (r Rect) {
 	portRatio := (r0.C1.X - r0.C0.X) / (r0.C1.Y - r0.C0.Y)
 	r = f.Bounds()
 	// fmt.Printf("%#v\n", r)
@@ -118,6 +118,17 @@ func (f *Fractal) AdjustedBounds(r0 Rect) (r Rect) {
 		dx = (sy * portRatio) - sx
 		r.C0.X -= dx / 2
 		r.C1.X += dx / 2
+	}
+	if scale != 0 {
+		dx = r.C1.X - r.C0.X
+		dy = r.C1.Y - r.C0.Y
+		scaleFactor := math.Pow(0.95, float64(scale))
+		sx := dx * (scaleFactor - 1)
+		sy := dy * (scaleFactor - 1)
+		r.C0.X -= sx / 2
+		r.C1.X += sx / 2
+		r.C0.Y -= sy / 2
+		r.C1.Y += sy / 2
 	}
 	// fmt.Printf("adjusted [%.3f, %.3f, ratio %.2f vs. %.2f] %#v\n", sx, sy, sx / sy, portRatio, r)
 	return
@@ -403,6 +414,7 @@ func run() int {
 	fullPort := sdl.Rect{0, 0, 1200, 800}
 	dataPort := sdl.Rect{0, 0, 200, 800}
 	fracPortRect := Rect{C0: Coord{5, 5}, C1: Coord{995, 795}}
+	fracPortScale := int32(0)
 	var mouseStart Coord
 	var pointStart Coord
 	var dragPoint int
@@ -419,7 +431,7 @@ func run() int {
 			fmt.Printf("oops, render %d failed.\n", i)
 		}
 	}
-	fracRect := frac.AdjustedBounds(fracPortRect)
+	fracRect := frac.AdjustedBounds(fracPortRect, fracPortScale)
 	toScreen, fromScreen := NewAffinesBetween(fracRect, fracPortRect)
 
 	sdl.Do(func() {
@@ -463,13 +475,15 @@ func run() int {
 
 	lab = make(map[string]*Field)
 	sdl.Do(func() {
-		lab["point"] = u.NewField("Point:", 5, 5, "%.0f", 100, 255, 255)
-		lab["x"] = u.NewField("X:", 5, 25, "%.3f", 100, 255, 255)
-		lab["y"] = u.NewField("Y:", 5, 45, "%.3f", 100, 255, 255)
-		u.NewButton("Add", 15, 60, 100, 255, 100, func() {
+		lab["point"] = u.NewField("Point:", 5, 65, "%.0f", 100, 255, 255)
+		lab["x"] = u.NewField("X:", 5, 85, "%.3f", 100, 255, 255)
+		lab["y"] = u.NewField("Y:", 5, 105, "%.3f", 100, 255, 255)
+		lab["scale"] = u.NewField("Scale:", 5, 5, "%.0f", 180, 180, 180)
+		lab["scale"].SetValue(float64(fracPortScale))
+		u.NewButton("Add", 15, 125, 100, 255, 100, func() {
 			frac.AddPoint(selectedPoint)
 		})
-		u.NewButton("Del", 85, 60, 100, 255, 100, func() {
+		u.NewButton("Del", 85, 125, 100, 255, 100, func() {
 			frac.DelPoint(selectedPoint)
 		})
 	})
@@ -483,6 +497,11 @@ func run() int {
 					runningMutex.Lock()
 					running = false
 					runningMutex.Unlock()
+				case *sdl.MouseWheelEvent:
+					fracPortScale += e.Y
+					fracRect = frac.AdjustedBounds(fracPortRect, fracPortScale)
+					toScreen, fromScreen = NewAffinesBetween(fracRect, fracPortRect)
+					lab["scale"].SetValue(float64(fracPortScale))
 				case *sdl.MouseButtonEvent:
 					// assume click is in fracPort
 					if e.X <= fracPort.X {
@@ -513,7 +532,7 @@ func run() int {
 						selectPoint(new)
 					} else if e.Button == 1 && e.State == sdl.RELEASED {
 						dragging = false
-						fracRect = frac.AdjustedBounds(fracPortRect)
+						fracRect = frac.AdjustedBounds(fracPortRect, fracPortScale)
 						toScreen, fromScreen = NewAffinesBetween(fracRect, fracPortRect)
 					}
 				case *sdl.MouseMotionEvent:
