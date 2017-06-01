@@ -67,6 +67,7 @@ type Fractal struct {
 	dataSize int
 	MaxDepth int
 	Depth    int
+	MaxOOM   uint
 	Base     []Point
 	data     []Point
 	lines    [][]Point
@@ -76,10 +77,14 @@ type Fractal struct {
 // indicate that we have to redraw
 func (f *Fractal) Changed() {
 	f.Depth = 0
+	f.Render(0)
 	f.Render(1)
 	f.Render(2)
 	f.Render(3)
 	f.Render(4)
+	if lab["depth"] != nil {
+		lab["depth"].SetValue(float64(frac.Depth))
+	}
 }
 
 func (f *Fractal) Bounds() (r Rect) {
@@ -203,13 +208,10 @@ func (f *Fractal) Alloc() {
 		totals[i] = total
 		size *= len(f.Base)
 		// cap maxdepth
-		if total+size > 100000 {
+		if total+size > (1 << f.MaxOOM) {
 			f.MaxDepth = i + 1
 		}
 	}
-	f.data = make([]Point, total, total)
-	// first line is trivial case: it has one point after 0,0, which is 1,0
-	f.data[0] = UnitLine[0]
 	f.lines = make([][]Point, f.MaxDepth)
 	prev := 0
 	fmt.Printf("%d points, %d depth, %d total size.\n", len(f.Base), f.MaxDepth, total)
@@ -221,11 +223,16 @@ func (f *Fractal) Alloc() {
 	f.Changed()
 }
 
-func NewFractal(base []Point, max int) *Fractal {
+func NewFractal(base []Point, maxOOM uint) *Fractal {
 	f := new(Fractal)
 	f.Base = base[:]
-	f.MaxDepth = max
-	f.Depth = 0
+	f.MaxOOM = maxOOM
+	f.data = make([]Point, 1 << f.MaxOOM, 1 << f.MaxOOM)
+	// special case: The first depth is automatic.
+	f.data[0] = UnitLine[0]
+	// this will be capped by MaxOOM
+	f.MaxDepth = 99
+	f.Depth = 1
 	f.Alloc()
 	return f
 }
@@ -277,6 +284,7 @@ func (f *Fractal) Points(depth int) []Point {
 		return nil
 	}
 	if depth == 0 {
+		UnitLine[0].H = 360 - (f.H / uint16(f.MaxDepth))
 		return UnitLine
 	}
 	return f.lines[depth]
@@ -284,7 +292,7 @@ func (f *Fractal) Points(depth int) []Point {
 
 func (f *Fractal) Render(depth int) bool {
 	var src []Point
-	// the 0-depth case is already filled in
+	// the 0-depth case is already filled in, but we need to fix color for it
 	if depth == 0 {
 		return true
 	}
@@ -319,7 +327,7 @@ func (f *Fractal) Partial(p0 Point, p1 Point, dest []Point) {
 	for i := 0; i < len(f.Base); i++ {
 		p := f.Base[i]
 		dest[i].X, dest[i].Y = a.Apply(p.X, p.Y)
-		dest[i].H = (p.H + p1.H + f.H) % 360
+		dest[i].H = (p.H + p1.H + (f.H / uint16(f.MaxDepth))) % 360
 		dest[i].S = p.S
 		dest[i].V = p.V
 		// fmt.Printf("... point %d: %v\n", i, dest[i])
@@ -375,20 +383,14 @@ var frac *Fractal
 func selectPoint(p int) {
 	if p >= 0 && p < len(frac.Base) {
 		selectedPoint = p
+		lab["x"].SetPointer(&frac.Base[p].X)
+		lab["y"].SetPointer(&frac.Base[p].Y)
+		lab["point"].SetValue(float64(selectedPoint))
 	} else {
 		selectedPoint = -1
 		lab["point"].SetActive(false)
 		lab["x"].SetActive(false)
 		lab["y"].SetActive(false)
-	}
-}
-
-func updateValues() {
-	if selectedPoint >= 0 {
-		p := frac.Base[selectedPoint]
-		lab["point"].SetValue(float64(selectedPoint))
-		lab["x"].SetValue(p.X)
-		lab["y"].SetValue(p.Y)
 	}
 }
 
@@ -424,8 +426,8 @@ func run() int {
 		Point{0.95, -0.25, 0, 0, 255, 255},
 		Point{1, 0, 0, 0, 255, 255},
 	}
-	frac = NewFractal(base, 12)
-	frac.H = 30
+	frac = NewFractal(base, 18)
+	frac.H = 330
 	for i := 0; i < frac.MaxDepth; i++ {
 		if !frac.Render(i) {
 			fmt.Printf("oops, render %d failed.\n", i)
@@ -475,15 +477,30 @@ func run() int {
 
 	lab = make(map[string]*Field)
 	sdl.Do(func() {
-		lab["point"] = u.NewField("Point:", 5, 65, "%.0f", 100, 255, 255)
-		lab["x"] = u.NewField("X:", 5, 85, "%.3f", 100, 255, 255)
-		lab["y"] = u.NewField("Y:", 5, 105, "%.3f", 100, 255, 255)
-		lab["scale"] = u.NewField("Scale:", 5, 5, "%.0f", 180, 180, 180)
+		// global
+		lab["depth"] = u.NewField("Depth:", 0, 0, "%.0f", 180, 180, 180)
+		lab["depth"].SetValue(float64(frac.Depth))
+		u.NewButton("+", 10, 20, 180, 255, 180, func() {
+			frac.MaxDepth++;
+			frac.Alloc();
+		})
+		u.NewButton("-", 30, 20, 255, 180, 180, func() {
+			if frac.MaxDepth > 3 {
+				frac.MaxDepth--;
+				frac.Changed();
+			}
+		})
+		lab["scale"] = u.NewField("Scale:", 100, 00, "%.0f", 180, 180, 180)
 		lab["scale"].SetValue(float64(fracPortScale))
-		u.NewButton("Add", 15, 125, 100, 255, 100, func() {
+
+		// per-point
+		lab["point"] = u.NewField("Point:", 0, 60, "%.0f", 100, 255, 255)
+		lab["x"] = u.NewField("X:", 0, 80, "%.3f", 100, 255, 255)
+		lab["y"] = u.NewField("Y:", 0, 100, "%.3f", 100, 255, 255)
+		u.NewButton("Add", 0, 120, 100, 255, 100, func() {
 			frac.AddPoint(selectedPoint)
 		})
-		u.NewButton("Del", 85, 125, 100, 255, 100, func() {
+		u.NewButton("Del", 50, 120, 100, 255, 100, func() {
 			frac.DelPoint(selectedPoint)
 		})
 	})
@@ -555,6 +572,7 @@ func run() int {
 		sdl.Do(func() {
 			if frac.Depth < frac.MaxDepth-1 {
 				frac.Render(frac.Depth + 1)
+				lab["depth"].SetValue(float64(frac.Depth))
 			}
 			renderer.SetViewport(&fullPort)
 			renderer.SetDrawBlendMode(sdl.BLENDMODE_NONE)
@@ -589,7 +607,6 @@ func run() int {
 			}
 			renderer.SetViewport(&dataPort)
 			renderer.SetDrawBlendMode(sdl.BLENDMODE_BLEND)
-			updateValues()
 			u.Draw()
 		})
 

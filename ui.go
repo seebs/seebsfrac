@@ -22,6 +22,7 @@ type Field struct {
 	active     bool
 	labeltext  string
 	value      float64
+	pointer    *float64
 	x, y       int32
 	lr, lg, lb uint8
 	vr, vg, vb uint8
@@ -134,6 +135,12 @@ func (f *Field) Close() {
 
 func (f *Field) SetValue(v float64) {
 	f.value = v
+	f.pointer = nil
+	f.active = true
+}
+
+func (f *Field) SetPointer(v *float64) {
+	f.pointer = v
 	f.active = true
 }
 
@@ -150,6 +157,9 @@ func (f *Field) SetValueColor(r, g, b uint8) {
 }
 
 func (f *Field) DrawValue() {
+	if f.pointer != nil {
+		f.value = *f.pointer
+	}
 	digits := fmt.Sprintf(f.fmt, f.value)
 	f.ui.DrawString(f.x+f.label.w+5, f.y, digits, f.vr, f.vg, f.vb)
 }
