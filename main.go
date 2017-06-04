@@ -531,24 +531,14 @@ func run() {
 			imd.Color = pixel.RGBA { float64(r) / 255, float64(g)/255, float64(b)/255, 1}
 			x0, y0 := toScreen.Apply(ZeroPoint.X, ZeroPoint.Y)
 			imd.Push(pixel.V(x0, y0))
-			pcount := 1
 			for j := 0; j < len(points); j++ {
 				p := points[j]
 				x1, y1 := toScreen.Apply(p.X, p.Y)
 				imd.Push(pixel.V(x1, y1))
-				pcount++
-				if pcount > 5000000 {
-					imd.Line(1)
-					imd.Draw(win)
-					imd.Clear()
-					imd.Push(pixel.V(x1, y1))
-					pcount = 0
-				}
 			}
-			imd.Line(1)
-			imd.Draw(win)
-			imd.Clear()
 		}
+		imd.Line(1)
+		imd.Draw(win)
 		win.Update()
 		if frac.Depth >= frac.MaxDepth-1 {
 			frac.Base[0].Y += .001
