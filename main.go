@@ -7,9 +7,11 @@ import (
 	"os"
 	"runtime/pprof"
 	"sync"
+	"time"
 
-	"github.com/veandco/go-sdl2/sdl"
-	"github.com/veandco/go-sdl2/sdl_gfx"
+	"github.com/faiface/pixel"
+	"github.com/faiface/pixel/imdraw"
+	"github.com/faiface/pixel/pixelgl"
 )
 
 // flags
@@ -399,10 +401,79 @@ func dist(x0, y0, x1, y1 float64) float64 {
 	return math.Sqrt(dx*dx + dy*dy)
 }
 
-func run() int {
-	var u *UI
-	var window *sdl.Window
-	var renderer *sdl.Renderer
+func fractish() int {
+	/*
+	var mouseStart Coord
+	var pointStart Coord
+	var dragPoint int
+	var dragging bool
+	for event := sdl.PollEvent(); event != nil; event = sdl.PollEvent() {
+		switch e := event.(type) {
+		case *sdl.QuitEvent:
+			runningMutex.Lock()
+			running = false
+			runningMutex.Unlock()
+		case *sdl.MouseWheelEvent:
+			fracPortScale += e.Y
+			fracRect = frac.AdjustedBounds(fracPortRect, fracPortScale)
+			toScreen, fromScreen = NewAffinesBetween(fracRect, fracPortRect)
+			lab["scale"].SetValue(float64(fracPortScale))
+		case *sdl.MouseButtonEvent:
+			// assume click is in fracPort
+			if e.X <= fracPort.X {
+				if e.Button == 1 && e.State == sdl.RELEASED {
+					if u.IsClicked(e.X, e.Y) {
+						fmt.Println("Clicked a thing!")
+					} else {
+						fmt.Println("Clicked no thing!")
+					}
+				}
+				break
+			}
+			e.X -= fracPort.X
+			e.Y -= fracPort.Y
+			if e.Button == 1 && e.State == sdl.PRESSED {
+				mouseStart.X, mouseStart.Y = fromScreen.Apply(float64(e.X), float64(e.Y))
+				new := -1
+				for i, p := range frac.Base {
+					px, py := toScreen.Apply(p.X, p.Y)
+					if dist(px, py, float64(e.X), float64(e.Y)) < 15 {
+						pointStart.X, pointStart.Y = p.X, p.Y
+						new = i
+						break
+					}
+				}
+				dragging = true
+				dragPoint = new
+				selectPoint(new)
+			} else if e.Button == 1 && e.State == sdl.RELEASED {
+				dragging = false
+				fracRect = frac.AdjustedBounds(fracPortRect, fracPortScale)
+				toScreen, fromScreen = NewAffinesBetween(fracRect, fracPortRect)
+			}
+		case *sdl.MouseMotionEvent:
+			if dragging {
+				e.X -= fracPort.X
+				e.Y -= fracPort.Y
+				// don't allow dragging last point
+				if dragPoint >= 0 && dragPoint < len(frac.Base)-1 {
+					newX, newY := fromScreen.Apply(float64(e.X), float64(e.Y))
+					frac.Base[dragPoint].X = newX - mouseStart.X + pointStart.X
+					frac.Base[dragPoint].Y = newY - mouseStart.Y + pointStart.Y
+					frac.Changed()
+				}
+			}
+		}
+	}
+	*/
+
+	for {
+	}
+
+	return 0
+}
+
+func run() {
 	var err error
 
 	f, err := os.Create("pdata")
@@ -412,15 +483,11 @@ func run() int {
 	pprof.StartCPUProfile(f)
 	defer pprof.StopCPUProfile()
 
-	fracPort := sdl.Rect{200, 0, 1000, 800}
-	fullPort := sdl.Rect{0, 0, 1200, 800}
-	dataPort := sdl.Rect{0, 0, 200, 800}
+	// fracPort := sdl.Rect{200, 0, 1000, 800}
+	// fullPort := sdl.Rect{0, 0, 1200, 800}
+	// dataPort := sdl.Rect{0, 0, 200, 800}
 	fracPortRect := Rect{C0: Coord{5, 5}, C1: Coord{995, 795}}
 	fracPortScale := int32(0)
-	var mouseStart Coord
-	var pointStart Coord
-	var dragPoint int
-	var dragging bool
 	base := []Point{
 		Point{0.05, 0.25, 0, 0, 255, 255},
 		Point{0.95, -0.25, 0, 0, 255, 255},
@@ -434,193 +501,70 @@ func run() int {
 		}
 	}
 	fracRect := frac.AdjustedBounds(fracPortRect, fracPortScale)
-	toScreen, fromScreen := NewAffinesBetween(fracRect, fracPortRect)
+	toScreen, _ := NewAffinesBetween(fracRect, fracPortRect)
 
-	sdl.Do(func() {
-		window, err = sdl.CreateWindow(MainWinInfo.Title, sdl.WINDOWPOS_UNDEFINED, sdl.WINDOWPOS_UNDEFINED, MainWinInfo.Width, MainWinInfo.Height, sdl.WINDOW_OPENGL)
-
-	})
+	cfg := pixelgl.WindowConfig{
+		Title:  "Pixel Rocks!",
+		Bounds: pixel.R(0, 0, 1024, 768),
+		VSync:  true,
+	}
+	win, err := pixelgl.NewWindow(cfg)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to create window: %s\n", err)
-		return 1
+		panic(err)
 	}
-	defer func() {
-		sdl.Do(func() {
-			window.Destroy()
-		})
-	}()
+	win.SetComposeMethod(pixel.ComposePlus)
 
-	sdl.Do(func() {
-		renderer, err = sdl.CreateRenderer(window, -1, sdl.RENDERER_ACCELERATED)
-	})
+	imd := imdraw.New(nil)
 
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to create renderer: %s\n", err)
-		return 2
-	}
+	second := time.Tick(time.Second)
+	frames := 0
 
-	sdl.Do(func() {
-		u = NewUI(renderer)
-	})
-
-	defer func() {
-		sdl.Do(func() {
-			u.Close()
-		})
-	}()
-
-	defer func() {
-		sdl.Do(func() {
-			renderer.Destroy()
-		})
-	}()
-
-	lab = make(map[string]*Field)
-	sdl.Do(func() {
-		// global
-		lab["depth"] = u.NewField("Depth:", 0, 0, "%.0f", 180, 180, 180)
-		lab["depth"].SetValue(float64(frac.Depth))
-		u.NewButton("+", 10, 20, 180, 255, 180, func() {
-			frac.MaxDepth++;
-			frac.Alloc();
-		})
-		u.NewButton("-", 30, 20, 255, 180, 180, func() {
-			if frac.MaxDepth > 3 {
-				frac.MaxDepth--;
-				frac.Changed();
-			}
-		})
-		lab["scale"] = u.NewField("Scale:", 100, 00, "%.0f", 180, 180, 180)
-		lab["scale"].SetValue(float64(fracPortScale))
-
-		// per-point
-		lab["point"] = u.NewField("Point:", 0, 60, "%.0f", 100, 255, 255)
-		lab["x"] = u.NewField("X:", 0, 80, "%.3f", 100, 255, 255)
-		lab["y"] = u.NewField("Y:", 0, 100, "%.3f", 100, 255, 255)
-		u.NewButton("Add", 0, 120, 100, 255, 100, func() {
-			frac.AddPoint(selectedPoint)
-		})
-		u.NewButton("Del", 50, 120, 100, 255, 100, func() {
-			frac.DelPoint(selectedPoint)
-		})
-	})
-
-	running := true
-	for running {
-		sdl.Do(func() {
-			for event := sdl.PollEvent(); event != nil; event = sdl.PollEvent() {
-				switch e := event.(type) {
-				case *sdl.QuitEvent:
-					runningMutex.Lock()
-					running = false
-					runningMutex.Unlock()
-				case *sdl.MouseWheelEvent:
-					fracPortScale += e.Y
-					fracRect = frac.AdjustedBounds(fracPortRect, fracPortScale)
-					toScreen, fromScreen = NewAffinesBetween(fracRect, fracPortRect)
-					lab["scale"].SetValue(float64(fracPortScale))
-				case *sdl.MouseButtonEvent:
-					// assume click is in fracPort
-					if e.X <= fracPort.X {
-						if e.Button == 1 && e.State == sdl.RELEASED {
-							if u.IsClicked(e.X, e.Y) {
-								fmt.Println("Clicked a thing!")
-							} else {
-								fmt.Println("Clicked no thing!")
-							}
-						}
-						break
-					}
-					e.X -= fracPort.X
-					e.Y -= fracPort.Y
-					if e.Button == 1 && e.State == sdl.PRESSED {
-						mouseStart.X, mouseStart.Y = fromScreen.Apply(float64(e.X), float64(e.Y))
-						new := -1
-						for i, p := range frac.Base {
-							px, py := toScreen.Apply(p.X, p.Y)
-							if dist(px, py, float64(e.X), float64(e.Y)) < 15 {
-								pointStart.X, pointStart.Y = p.X, p.Y
-								new = i
-								break
-							}
-						}
-						dragging = true
-						dragPoint = new
-						selectPoint(new)
-					} else if e.Button == 1 && e.State == sdl.RELEASED {
-						dragging = false
-						fracRect = frac.AdjustedBounds(fracPortRect, fracPortScale)
-						toScreen, fromScreen = NewAffinesBetween(fracRect, fracPortRect)
-					}
-				case *sdl.MouseMotionEvent:
-					if dragging {
-						e.X -= fracPort.X
-						e.Y -= fracPort.Y
-						// don't allow dragging last point
-						if dragPoint >= 0 && dragPoint < len(frac.Base)-1 {
-							newX, newY := fromScreen.Apply(float64(e.X), float64(e.Y))
-							frac.Base[dragPoint].X = newX - mouseStart.X + pointStart.X
-							frac.Base[dragPoint].Y = newY - mouseStart.Y + pointStart.Y
-							frac.Changed()
-						}
-					}
+	for !win.Closed() {
+		win.Clear(pixel.RGBA{0, 0, 0, 255})
+		for frac.Depth < frac.MaxDepth-1 {
+			frac.Render(frac.Depth + 1)
+		}
+		imd.Clear()
+		for i := 1; i <= frac.Depth; i++ {
+			points := frac.Points(i)
+			r, g, b := rgb(points[0].H, points[0].S, points[0].V)
+			imd.Color = pixel.RGBA { float64(r) / 255, float64(g)/255, float64(b)/255, 1}
+			x0, y0 := toScreen.Apply(ZeroPoint.X, ZeroPoint.Y)
+			imd.Push(pixel.V(x0, y0))
+			pcount := 1
+			for j := 0; j < len(points); j++ {
+				p := points[j]
+				x1, y1 := toScreen.Apply(p.X, p.Y)
+				imd.Push(pixel.V(x1, y1))
+				pcount++
+				if pcount > 5000000 {
+					imd.Line(1)
+					imd.Draw(win)
+					imd.Clear()
+					imd.Push(pixel.V(x1, y1))
+					pcount = 0
 				}
 			}
-		})
-
-		// Do expensive stuff using goroutines
-		sdl.Do(func() {
-			if frac.Depth < frac.MaxDepth-1 {
-				frac.Render(frac.Depth + 1)
-				lab["depth"].SetValue(float64(frac.Depth))
-			}
-			renderer.SetViewport(&fullPort)
-			renderer.SetDrawBlendMode(sdl.BLENDMODE_NONE)
-			renderer.SetDrawColor(0, 0, 0, 0xFF)
-			renderer.FillRect(&fullPort)
-			renderer.SetDrawBlendMode(sdl.BLENDMODE_ADD)
-			renderer.SetViewport(&fracPort)
-			for i := 1; i <= frac.Depth; i++ {
-				points := frac.Points(i)
-				x0, y0 := toScreen.ApplyInt(ZeroPoint.X, ZeroPoint.Y)
-				for j := 0; j < len(points); j++ {
-					p := points[j]
-					r, g, b := rgb(p.H, p.S, p.V)
-					x1, y1 := toScreen.ApplyInt(p.X, p.Y)
-					// gfx.AALineColor(renderer, x0, y0, x1, y1, sdl.Color{uint8(r), uint8(g), uint8(b), 255})
-					renderer.SetDrawColor(uint8(r), uint8(g), uint8(b), 255)
-					renderer.DrawLine(x0, y0, x1, y1)
-					x0, y0 = x1, y1
-				}
-			}
-			if selectedPoint >= 0 {
-				pts := frac.Points(1)
-				p1 := pts[selectedPoint]
-				r, g, b := rgb(p1.H, p1.S, p1.V)
-				var p0 Point
-				if selectedPoint > 0 {
-					p0 = pts[selectedPoint-1]
-				}
-				x0, y0 := toScreen.ApplyInt(p0.X, p0.Y)
-				x1, y1 := toScreen.ApplyInt(p1.X, p1.Y)
-				gfx.ThickLineColor(renderer, x0, y0, x1, y1, 3, sdl.Color{uint8(r), uint8(g), uint8(b), 255})
-			}
-			renderer.SetViewport(&dataPort)
-			renderer.SetDrawBlendMode(sdl.BLENDMODE_BLEND)
-			u.Draw()
-		})
-
-		sdl.Do(func() {
-			renderer.Present()
-			sdl.Delay(1000 / FrameRate)
-		})
+			imd.Line(1)
+			imd.Draw(win)
+			imd.Clear()
+		}
+		win.Update()
+		if frac.Depth >= frac.MaxDepth-1 {
+			frac.Base[0].Y += .001
+			frac.Changed()
+		}
+		frames++
+                select {
+                case <-second:
+                        fmt.Printf("FPS: %d\n", frames)
+                        frames = 0
+                default:
+                }
+ 
 	}
-
-	return 0
 }
 
 func main() {
-	sdl.Main(func() {
-		os.Exit(run())
-	})
+	pixelgl.Run(run)
 }
