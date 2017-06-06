@@ -84,9 +84,6 @@ func (f *Fractal) Changed() {
 	f.Render(2)
 	f.Render(3)
 	f.Render(4)
-	if lab["depth"] != nil {
-		lab["depth"].SetValue(float64(frac.Depth))
-	}
 }
 
 func (f *Fractal) Bounds() (r Rect) {
@@ -379,20 +376,13 @@ func rgb(h, s, v uint16) (r, g, b uint16) {
 }
 
 var selectedPoint = -1
-var lab map[string]*Field
 var frac *Fractal
 
 func selectPoint(p int) {
 	if p >= 0 && p < len(frac.Base) {
 		selectedPoint = p
-		lab["x"].SetPointer(&frac.Base[p].X)
-		lab["y"].SetPointer(&frac.Base[p].Y)
-		lab["point"].SetValue(float64(selectedPoint))
 	} else {
 		selectedPoint = -1
-		lab["point"].SetActive(false)
-		lab["x"].SetActive(false)
-		lab["y"].SetActive(false)
 	}
 }
 
@@ -417,7 +407,6 @@ func fractish() int {
 			fracPortScale += e.Y
 			fracRect = frac.AdjustedBounds(fracPortRect, fracPortScale)
 			toScreen, fromScreen = NewAffinesBetween(fracRect, fracPortRect)
-			lab["scale"].SetValue(float64(fracPortScale))
 		case *sdl.MouseButtonEvent:
 			// assume click is in fracPort
 			if e.X <= fracPort.X {
@@ -501,11 +490,12 @@ func run() {
 		}
 	}
 	fracRect := frac.AdjustedBounds(fracPortRect, fracPortScale)
-	toScreen, _ := NewAffinesBetween(fracRect, fracPortRect)
+	toScreen, fromScreen := NewAffinesBetween(fracRect, fracPortRect)
+	_, _ = toScreen, fromScreen
 
 	cfg := pixelgl.WindowConfig{
 		Title:  "Pixel Rocks!",
-		Bounds: pixel.R(0, 0, 1024, 768),
+		Bounds: pixel.R(0, 0, 1200, 800),
 		VSync:  true,
 	}
 	win, err := pixelgl.NewWindow(cfg)
@@ -513,37 +503,62 @@ func run() {
 		panic(err)
 	}
 	win.SetComposeMethod(pixel.ComposePlus)
+	// win.SetSmooth(true)
 
 	imd := imdraw.New(nil)
+	fracMatrix := pixel.IM.Scaled(pixel.Vec{},800).Moved(pixel.Vec{200, 400})
+	imd.SetMatrix(fracMatrix)
 
 	second := time.Tick(time.Second)
 	frames := 0
 
 	for !win.Closed() {
+		if win.JustPressed(pixelgl.MouseButtonLeft) {
+			click := win.MousePosition()
+			leastDist := 999999.0
+			pidx := -1
+			for i, p := range frac.Base {
+				pv := fracMatrix.Project(pixel.Vec{p.X, p.Y})
+				dist := math.Hypot(pv.X - click.X, pv.Y - click.Y)
+				if dist < 15 && dist < leastDist {
+					leastDist = dist
+					pidx = i
+				}
+			}
+			selectPoint(pidx)
+			fmt.Printf("click at %.0f, %.0f => %.1f px to point %d\n",
+				click.X, click.Y, leastDist, pidx)
+		}
 		win.Clear(pixel.RGBA{0, 0, 0, 255})
-		for frac.Depth < frac.MaxDepth-1 {
+		if frac.Depth < frac.MaxDepth-1 {
 			frac.Render(frac.Depth + 1)
 		}
 		imd.Clear()
 		for i := 1; i <= frac.Depth; i++ {
+			imd.Push(pixel.Vec{})
 			points := frac.Points(i)
 			r, g, b := rgb(points[0].H, points[0].S, points[0].V)
 			imd.Color = pixel.RGBA { float64(r) / 255, float64(g)/255, float64(b)/255, 1}
-			x0, y0 := toScreen.Apply(ZeroPoint.X, ZeroPoint.Y)
-			imd.Push(pixel.V(x0, y0))
 			for j := 0; j < len(points); j++ {
 				p := points[j]
-				x1, y1 := toScreen.Apply(p.X, p.Y)
-				imd.Push(pixel.V(x1, y1))
+				imd.Push(pixel.Vec{p.X, p.Y})
 			}
+			imd.Line(1.0/800)
 		}
-		imd.Line(1)
+		if selectedPoint >= 0 {
+			p := frac.Base[selectedPoint]
+			if selectedPoint > 0 {
+				imd.Push(pixel.Vec{frac.Base[selectedPoint - 1].X, frac.Base[selectedPoint - 1].Y})
+			} else {
+				imd.Push(pixel.Vec{})
+			}
+			r, g, b := rgb(p.H, p.S, p.V)
+			imd.Color = pixel.RGBA { float64(r) / 255, float64(g)/255, float64(b)/255, 1}
+			imd.Push(pixel.Vec{p.X, p.Y})
+			imd.Line(3.0/800)
+		}
 		imd.Draw(win)
 		win.Update()
-		if frac.Depth >= frac.MaxDepth-1 {
-			frac.Base[0].Y += .001
-			frac.Changed()
-		}
 		frames++
                 select {
                 case <-second:
