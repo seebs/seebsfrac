@@ -475,7 +475,7 @@ func run() {
 	// fracPort := sdl.Rect{200, 0, 1000, 800}
 	// fullPort := sdl.Rect{0, 0, 1200, 800}
 	// dataPort := sdl.Rect{0, 0, 200, 800}
-	fracPortRect := Rect{C0: Coord{5, 5}, C1: Coord{995, 795}}
+	fracPortRect := Rect{C0: Coord{5, 5}, C1: Coord{1995, 1595}}
 	fracPortScale := int32(0)
 	base := []Point{
 		Point{0.05, 0.25, 0, 0, 255, 255},
@@ -502,11 +502,14 @@ func run() {
 	if err != nil {
 		panic(err)
 	}
-	win.SetComposeMethod(pixel.ComposePlus)
-	// win.SetSmooth(true)
+	win.SetSmooth(true)
+
+	can := pixelgl.NewCanvas(pixel.Rect{pixel.Vec{0, 0}, pixel.Vec{2000, 1600}})
+	can.SetComposeMethod(pixel.ComposePlus)
+	canMatrix := pixel.IM.Scaled(pixel.Vec{0,0}, 0.5).Moved(pixel.Vec{700, 400})
 
 	imd := imdraw.New(nil)
-	fracMatrix := pixel.IM.Scaled(pixel.Vec{},800).Moved(pixel.Vec{200, 400})
+	fracMatrix := pixel.IM.Scaled(pixel.Vec{0,0}, toScreen.X1).Moved(pixel.Vec{toScreen.X0, toScreen.Y0})
 	imd.SetMatrix(fracMatrix)
 
 	second := time.Tick(time.Second)
@@ -529,7 +532,7 @@ func run() {
 			fmt.Printf("click at %.0f, %.0f => %.1f px to point %d\n",
 				click.X, click.Y, leastDist, pidx)
 		}
-		win.Clear(pixel.RGBA{0, 0, 0, 255})
+		can.Clear(pixel.RGBA{0, 0, 0, 255})
 		if frac.Depth < frac.MaxDepth-1 {
 			frac.Render(frac.Depth + 1)
 		}
@@ -543,7 +546,7 @@ func run() {
 				p := points[j]
 				imd.Push(pixel.Vec{p.X, p.Y})
 			}
-			imd.Line(1.0/800)
+			imd.Line(fromScreen.X1 * 2)
 		}
 		if selectedPoint >= 0 {
 			p := frac.Base[selectedPoint]
@@ -555,9 +558,10 @@ func run() {
 			r, g, b := rgb(p.H, p.S, p.V)
 			imd.Color = pixel.RGBA { float64(r) / 255, float64(g)/255, float64(b)/255, 1}
 			imd.Push(pixel.Vec{p.X, p.Y})
-			imd.Line(3.0/800)
+			imd.Line(fromScreen.X1 * 6)
 		}
-		imd.Draw(win)
+		imd.Draw(can)
+		can.Draw(win, canMatrix)
 		win.Update()
 		frames++
                 select {
