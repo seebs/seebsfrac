@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io/ioutil"
 	"log"
 	"math"
 	"os"
@@ -12,6 +13,10 @@ import (
 	"github.com/faiface/pixel"
 	"github.com/faiface/pixel/imdraw"
 	"github.com/faiface/pixel/pixelgl"
+	"github.com/faiface/pixel/text"
+	"github.com/golang/freetype/truetype"
+
+	"golang.org/x/image/font"
 )
 
 // flags
@@ -23,6 +28,13 @@ const (
 	FixedH
 	FixedS
 	FixedV
+)
+
+var (
+	face font.Face
+	atlas *text.Atlas
+	textRenderer *text.Text
+	textMatrix pixel.Matrix
 )
 
 type Point struct {
@@ -264,16 +276,28 @@ func (f *Fractal) Partial(p0 Point, p1 Point, dest []Point) {
 	}
 }
 
-type wininfo struct {
-	Title         string
-	Width, Height int
+func loadTTF(path string, size float64) (font.Face, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	bytes, err := ioutil.ReadAll(file)
+	if err != nil {
+		return nil, err
+	}
+
+	font, err := truetype.Parse(bytes)
+	if err != nil {
+		return nil, err
+	}
+
+	return truetype.NewFace(font, &truetype.Options{
+		Size:              size,
+		GlyphCacheEntries: 1,
+	}), nil
 }
-
-const (
-	FrameRate = 30
-)
-
-var MainWinInfo = wininfo{Title: "Frac", Width: 1200, Height: 800}
 
 var runningMutex sync.Mutex
 
@@ -393,17 +417,43 @@ func fractish() int {
 	return 0
 }
 
+func init() {
+	var err error
+
+	face, err = loadTTF("Go-Mono.ttf", 20)
+	if err != nil {
+		log.Fatal(err)
+	}
+	atlas = text.NewAtlas(face, text.ASCII)
+
+	textRenderer = text.New(pixel.Vec{}, atlas)
+
+	textMatrix = pixel.Matrix{
+	0: atlas.Glyph(' ').Advance,
+	3: -atlas.LineHeight(),
+	5: 800 - atlas.LineHeight(),
+	}
+}
+
+func textAt(t pixel.Target, at pixel.Vec, color pixel.RGBA, format string, args ... interface{}) {
+	at = textMatrix.Project(at)
+	textRenderer.Clear()
+	textRenderer.Color = color
+	textRenderer.Orig = at
+	textRenderer.Dot = textRenderer.Orig
+	fmt.Fprintf(textRenderer, format, args...)
+	textRenderer.Draw(t, pixel.IM)
+}
+
 func run() {
 	var err error
 
-	if false {
 	f, err := os.Create("pdata")
 	if err != nil {
 		log.Fatal(err)
 	}
 	pprof.StartCPUProfile(f)
 	defer pprof.StopCPUProfile()
-	}
 
 	fracPortRect := pixel.Rect{Min: pixel.Vec{5, 5}, Max: pixel.Vec{1995, 1595}}
 	fracPortScale := int32(0)
@@ -479,6 +529,13 @@ func run() {
 			frac.Render(frac.Depth + 1)
 		}
 		win.Clear(pixel.RGBA{0, 0, 0, 255})
+		textAt(win, pixel.Vec{0, 0.5}, pixel.RGBA { 0, 0, 1, 1 }, "----5----+----5----+----5")
+		textAt(win, pixel.Vec{0, 0}, pixel.RGBA { 1, 0, 0, 1 }, "----5----+----5----+----5")
+		textAt(win, pixel.Vec{0, 1}, pixel.RGBA { 0, 1, 0, 1 }, "----5----+----5----+----5")
+		win.SetComposeMethod(pixel.ComposeOver)
+		can.Clear(pixel.RGBA{0, 0, 0, 255})
+		can.Draw(win, canMatrix)
+		win.SetComposeMethod(pixel.ComposePlus)
 		for i := 1; i <= frac.Depth; i++ {
 			imd.Clear()
 			points := frac.Points(i)
@@ -490,9 +547,9 @@ func run() {
 				imd.Push(pixel.Vec{p.X, p.Y})
 			}
 			imd.Line(fromScreen[0] * 2)
-			can.Clear(pixel.RGBA{0, 0, 0, 255})
 			imd.Draw(can)
 			can.Draw(win, canMatrix)
+			can.Clear(pixel.RGBA{0, 0, 0, 255})
 		}
 		if selectedPoint >= 0 {
 			p := frac.Base[selectedPoint]
@@ -506,9 +563,9 @@ func run() {
 			}
 			imd.Push(pixel.Vec{p.X, p.Y})
 			imd.Line(fromScreen[0] * 6)
-			can.Clear(pixel.RGBA{0, 0, 0, 255})
 			imd.Draw(can)
 			can.Draw(win, canMatrix)
+			can.Clear(pixel.RGBA{0, 0, 0, 255})
 		}
 		win.Update()
 		frames++
