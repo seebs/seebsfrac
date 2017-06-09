@@ -25,33 +25,8 @@ const (
 	FixedV
 )
 
-type Coord struct {
-	X, Y float64
-}
-
-type Rect struct {
-	C0, C1 Coord
-}
-
-func (r Rect) GoString() string {
-	return fmt.Sprintf("[%.4f, %.4f], [%.4f, %.4f]",
-		r.C0.X, r.C0.Y, r.C1.X, r.C1.Y)
-}
-
-func (r Rect) Scales() (x, y float64) {
-	dx, dy := r.C1.X-r.C0.X, r.C1.Y-r.C0.Y
-	// arbitrarily attempt to avoid division by zero
-	if dx == 0 {
-		dx = -1
-	}
-	if dy == 0 {
-		dy = -1
-	}
-	return math.Abs(dx), math.Abs(dy)
-}
-
 type Point struct {
-	X, Y    float64
+	pixel.Vec
 	Flags   int
 	H, S, V uint16 // 0-360, 0-255, 0-255
 }
@@ -59,11 +34,6 @@ type Point struct {
 func (p Point) GoString() string {
 	return fmt.Sprintf("%.3f, %.3f, 0x%03x, %d/%d/%d", p.X, p.Y, p.Flags, p.H, p.S, p.V)
 }
-
-var (
-	ZeroPoint = Point{X: 0, Y: 0}
-	UnitLine  = []Point{Point{X: 1, Y: 0}}
-)
 
 type Fractal struct {
 	dataSize int
@@ -86,116 +56,78 @@ func (f *Fractal) Changed() {
 	f.Render(4)
 }
 
-func (f *Fractal) Bounds() (r Rect) {
-	r.C0.X, r.C0.Y, r.C1.X, r.C1.Y = 0, 0, 1, 0
+func (f *Fractal) Bounds() (r pixel.Rect) {
+	r.Min.X, r.Min.Y, r.Max.X, r.Max.Y = 0, 0, 1, 0
 	for i := 0; i <= f.Depth; i++ {
 		for _, p := range f.lines[i] {
-			if p.X < r.C0.X {
-				r.C0.X = p.X
-			} else if p.X > r.C1.X {
-				r.C1.X = p.X
+			if p.X < r.Min.X {
+				r.Min.X = p.X
+			} else if p.X > r.Max.X {
+				r.Max.X = p.X
 			}
-			if p.Y < r.C0.Y {
-				r.C0.Y = p.Y
-			} else if p.Y > r.C1.Y {
-				r.C1.Y = p.Y
+			if p.Y < r.Min.Y {
+				r.Min.Y = p.Y
+			} else if p.Y > r.Max.Y {
+				r.Max.Y = p.Y
 			}
 		}
 	}
 	return
 }
 
-func (f *Fractal) AdjustedBounds(r0 Rect, scale int32) (r Rect) {
-	portRatio := (r0.C1.X - r0.C0.X) / (r0.C1.Y - r0.C0.Y)
+func (f *Fractal) AdjustedBounds(r0 pixel.Rect, scale int32) (r pixel.Rect) {
+	portRatio := (r0.Max.X - r0.Min.X) / (r0.Max.Y - r0.Min.Y)
 	r = f.Bounds()
 	// fmt.Printf("%#v\n", r)
-	sx, sy := r.C1.X-r.C0.X, r.C1.Y-r.C0.Y
+	sx, sy := r.Max.X-r.Min.X, r.Max.Y-r.Min.Y
 	if sy < .001 {
 		sy = .001
 	}
 	var dx, dy float64
 	if sy == 0 || (sx/sy) > portRatio {
 		dy = (sx / portRatio) - sy
-		r.C0.Y -= dy / 2
-		r.C1.Y += dy / 2
+		r.Min.Y -= dy / 2
+		r.Max.Y += dy / 2
 	} else {
 		dx = (sy * portRatio) - sx
-		r.C0.X -= dx / 2
-		r.C1.X += dx / 2
+		r.Min.X -= dx / 2
+		r.Max.X += dx / 2
 	}
 	if scale != 0 {
-		dx = r.C1.X - r.C0.X
-		dy = r.C1.Y - r.C0.Y
+		dx = r.Max.X - r.Min.X
+		dy = r.Max.Y - r.Min.Y
 		scaleFactor := math.Pow(0.95, float64(scale))
 		sx := dx * (scaleFactor - 1)
 		sy := dy * (scaleFactor - 1)
-		r.C0.X -= sx / 2
-		r.C1.X += sx / 2
-		r.C0.Y -= sy / 2
-		r.C1.Y += sy / 2
+		r.Min.X -= sx / 2
+		r.Max.X += sx / 2
+		r.Min.Y -= sy / 2
+		r.Max.Y += sy / 2
 	}
 	// fmt.Printf("adjusted [%.3f, %.3f, ratio %.2f vs. %.2f] %#v\n", sx, sy, sx / sy, portRatio, r)
 	return
 }
 
-type Affine struct {
-	// x1 x2 x0
-	// y1 y2 y0
-	// [0 0 1]
-	X0, X1, X2, Y0, Y1, Y2 float64
-}
-
-func (a Affine) GoString() string {
-	return fmt.Sprintf("[ %.4f %.4f %.4f ]\n[ %.4f %.4f %.4f ]",
-		a.X1, a.X2, a.X0, a.Y1, a.Y2, a.Y0)
-}
-
-func (a Affine) Apply(x, y float64) (rx, ry float64) {
-	rx = a.X1*x + a.X2*y + a.X0
-	ry = a.Y1*x + a.Y2*y + a.Y0
-	return
-}
-
-func (a Affine) ApplyInt(x, y float64) (rx, ry int) {
-	rx = int(a.X1*x + a.X2*y + a.X0)
-	ry = int(a.Y1*x + a.Y2*y + a.Y0)
-	return
-}
-
-func NewAffineBetween(p0, p1 Point) Affine {
-	a := Affine{X0: p0.X, Y0: p0.Y}
+func NewAffineBetween(p0, p1 Point) pixel.Matrix {
 	dx, dy := p1.X-p0.X, p1.Y-p0.Y
-	scale := math.Sqrt(dx*dx + dy*dy)
+
+	scale := math.Hypot(dx, dy)
 	theta := math.Atan2(dy, dx)
-	cost := math.Cos(theta)
-	sint := math.Sin(theta)
+	sint, cost := math.Sincos(theta)
+
+	return pixel.Matrix{scale * cost, scale * sint, -scale * sint, scale * cost, p0.X, p0.Y }
 	// x1 x2 x0   x   x'
 	// y1 y2 y0 * y = y'
 	// 0  0  1    1   1
-	a.X1, a.Y1, a.X2, a.Y2 = scale*cost, scale*sint, -scale*sint, scale*cost
-	return a
 }
 
-func NewAffinesBetween(r0, r1 Rect) (to, from Affine) {
-	sx0, sy0 := r0.Scales()
-	sx1, sy1 := r1.Scales()
-	to = Affine{X0: r1.C0.X - (r0.C0.X * sx1 / sx0), Y0: r1.C0.Y - (r0.C0.Y * sy1 / sy0), X1: sx1 / sx0, Y2: sy1 / sy0}
-	from = Affine{X0: r0.C0.X - (r1.C0.X * sx0 / sx1), Y0: r0.C0.Y - (r1.C0.Y * sy0 / sy1), X1: sx0 / sx1, Y2: sy0 / sy1}
-	// fmt.Println("affines for:")
-	// fmt.Printf("%#v =>\n", r0)
-	// fmt.Printf("%#v\n", r1)
-	// fmt.Println("to:")
-	// fmt.Printf("%#v\n", to)
+func NewAffinesBetween(r0, r1 pixel.Rect) (to, from pixel.Matrix) {
+	s0 := r0.Size()
+	s1 := r1.Size()
+	to = pixel.Matrix{4: r1.Min.X - (r0.Min.X * s1.X / s0.X), 5: r1.Min.Y - (r0.Min.Y * s1.Y / s0.Y), 0: s1.X / s0.X, 3: s1.Y / s0.Y}
+	from = pixel.Matrix{4: r0.Min.X - (r1.Min.X * s0.X / s1.X), 5: r0.Min.Y - (r1.Min.Y * s0.Y / s1.Y), 0: s0.X / s1.X, 3: s0.Y / s1.Y}
 
 	return
-}
-
-func NewAffineTo(sx, sy, ox, oy float64) Affine {
-	return Affine{X0: ox, Y0: oy, X1: sx, Y2: sy}
-}
-
-func NewAffineFrom(sx, sy, ox, oy float64) Affine {
-	return Affine{X0: -ox, Y0: -oy, X1: 1 / sx, Y2: 1 / sy}
 }
 
 func (f *Fractal) Alloc() {
@@ -228,7 +160,7 @@ func NewFractal(base []Point, maxOOM uint) *Fractal {
 	f.MaxOOM = maxOOM
 	f.data = make([]Point, 1 << f.MaxOOM, 1 << f.MaxOOM)
 	// special case: The first depth is automatic.
-	f.data[0] = UnitLine[0]
+	f.data[0] = Point { Vec: pixel.Vec { X: 1, Y: 0 }}
 	// this will be capped by MaxOOM
 	f.MaxDepth = 99
 	f.Depth = 1
@@ -283,8 +215,7 @@ func (f *Fractal) Points(depth int) []Point {
 		return nil
 	}
 	if depth == 0 {
-		UnitLine[0].H = 360 - (f.H / uint16(f.MaxDepth))
-		return UnitLine
+		return []Point { Point { Vec: pixel.Vec { X: 1, Y: 0 }, H: 330 } }
 	}
 	return f.lines[depth]
 }
@@ -307,7 +238,7 @@ func (f *Fractal) Render(depth int) bool {
 
 	// fmt.Printf("render depth %d (src %d, dest %d points)\n", depth, len(src), cap(dest))
 
-	prev := ZeroPoint
+	prev := Point{}
 	for p := range src {
 		// fmt.Printf("rendering partial %d [%d:%d]\n", p, offset, offset + l)
 		f.Partial(prev, src[p], dest[offset:offset+l])
@@ -325,7 +256,7 @@ func (f *Fractal) Partial(p0 Point, p1 Point, dest []Point) {
 
 	for i := 0; i < len(f.Base); i++ {
 		p := f.Base[i]
-		dest[i].X, dest[i].Y = a.Apply(p.X, p.Y)
+		dest[i].Vec = a.Project(p.Vec)
 		dest[i].H = (p.H + p1.H + (f.H / uint16(f.MaxDepth))) % 360
 		dest[i].S = p.S
 		dest[i].V = p.V
@@ -393,8 +324,8 @@ func dist(x0, y0, x1, y1 float64) float64 {
 
 func fractish() int {
 	/*
-	var mouseStart Coord
-	var pointStart Coord
+	var mouseStart pixel.Vec
+	var pointStart pixel.Vec
 	var dragPoint int
 	var dragging bool
 	for event := sdl.PollEvent(); event != nil; event = sdl.PollEvent() {
@@ -465,22 +396,21 @@ func fractish() int {
 func run() {
 	var err error
 
+	if false {
 	f, err := os.Create("pdata")
 	if err != nil {
 		log.Fatal(err)
 	}
 	pprof.StartCPUProfile(f)
 	defer pprof.StopCPUProfile()
+	}
 
-	// fracPort := sdl.Rect{200, 0, 1000, 800}
-	// fullPort := sdl.Rect{0, 0, 1200, 800}
-	// dataPort := sdl.Rect{0, 0, 200, 800}
-	fracPortRect := Rect{C0: Coord{5, 5}, C1: Coord{1995, 1595}}
+	fracPortRect := pixel.Rect{Min: pixel.Vec{5, 5}, Max: pixel.Vec{1995, 1595}}
 	fracPortScale := int32(0)
 	base := []Point{
-		Point{0.05, 0.25, 0, 0, 255, 255},
-		Point{0.95, -0.25, 0, 0, 255, 255},
-		Point{1, 0, 0, 0, 255, 255},
+		Point{pixel.Vec {0.05, 0.25}, 0, 0, 255, 255},
+		Point{pixel.Vec {0.95, -0.25}, 0, 0, 255, 255},
+		Point{pixel.Vec {1, 0}, 0, 0, 255, 255},
 	}
 	frac = NewFractal(base, 18)
 	frac.H = 330
@@ -505,63 +435,81 @@ func run() {
 	win.SetSmooth(true)
 
 	can := pixelgl.NewCanvas(pixel.Rect{pixel.Vec{0, 0}, pixel.Vec{2000, 1600}})
-	can.SetComposeMethod(pixel.ComposePlus)
+	win.SetComposeMethod(pixel.ComposePlus)
 	canMatrix := pixel.IM.Scaled(pixel.Vec{0,0}, 0.5).Moved(pixel.Vec{700, 400})
 
 	imd := imdraw.New(nil)
-	fracMatrix := pixel.IM.Scaled(pixel.Vec{0,0}, toScreen.X1).Moved(pixel.Vec{toScreen.X0, toScreen.Y0})
+	fracMatrix := pixel.IM.Scaled(pixel.Vec{0,0}, toScreen[0]).Moved(pixel.Vec{toScreen[4], toScreen[5]})
 	imd.SetMatrix(fracMatrix)
 
 	second := time.Tick(time.Second)
 	frames := 0
 
 	for !win.Closed() {
+		scrolled := win.MouseScroll()
+		if scrolled.Y != 0 {
+			fracPortScale += int32(scrolled.Y)
+			fracRect = frac.AdjustedBounds(fracPortRect, fracPortScale)
+			toScreen, fromScreen = NewAffinesBetween(fracRect, fracPortRect)
+			fracMatrix := pixel.IM.Scaled(pixel.Vec{0,0}, toScreen[0]).Moved(pixel.Vec{toScreen[4], toScreen[5]})
+			imd.SetMatrix(fracMatrix)
+		}
 		if win.JustPressed(pixelgl.MouseButtonLeft) {
 			click := win.MousePosition()
+			// find click within the canvas space
+			c2 := canMatrix.Unproject(click)
+			c3 := c2.Add(pixel.Vec{1000, 800})
+			leastVec := pixel.Vec{}
 			leastDist := 999999.0
 			pidx := -1
 			for i, p := range frac.Base {
 				pv := fracMatrix.Project(pixel.Vec{p.X, p.Y})
-				dist := math.Hypot(pv.X - click.X, pv.Y - click.Y)
-				if dist < 15 && dist < leastDist {
+				dist := math.Hypot(pv.X - c3.X, pv.Y - c3.Y)
+				if dist < leastDist {
 					leastDist = dist
+					leastVec = pv
 					pidx = i
 				}
 			}
 			selectPoint(pidx)
-			fmt.Printf("click at %.0f, %.0f => %.1f px to point %d\n",
-				click.X, click.Y, leastDist, pidx)
+			fmt.Printf("click at %.0f, %.0f win, %.0f, %.0f canvas, %.0f, %.0f adjusted => point %d at %.1f, %.1f, %.1f px away\n",
+				click.X, click.Y, c2.X, c2.Y, c3.X, c3.Y, pidx, leastVec.X, leastVec.Y, leastDist)
 		}
-		can.Clear(pixel.RGBA{0, 0, 0, 255})
 		if frac.Depth < frac.MaxDepth-1 {
 			frac.Render(frac.Depth + 1)
 		}
-		imd.Clear()
+		win.Clear(pixel.RGBA{0, 0, 0, 255})
 		for i := 1; i <= frac.Depth; i++ {
-			imd.Push(pixel.Vec{})
+			imd.Clear()
 			points := frac.Points(i)
 			r, g, b := rgb(points[0].H, points[0].S, points[0].V)
 			imd.Color = pixel.RGBA { float64(r) / 255, float64(g)/255, float64(b)/255, 1}
+			imd.Push(pixel.Vec{})
 			for j := 0; j < len(points); j++ {
 				p := points[j]
 				imd.Push(pixel.Vec{p.X, p.Y})
 			}
-			imd.Line(fromScreen.X1 * 2)
+			imd.Line(fromScreen[0] * 2)
+			can.Clear(pixel.RGBA{0, 0, 0, 255})
+			imd.Draw(can)
+			can.Draw(win, canMatrix)
 		}
 		if selectedPoint >= 0 {
 			p := frac.Base[selectedPoint]
+			imd.Clear()
+			r, g, b := rgb(p.H, p.S, p.V)
+			imd.Color = pixel.RGBA { float64(r) / 255, float64(g)/255, float64(b)/255, 1}
 			if selectedPoint > 0 {
 				imd.Push(pixel.Vec{frac.Base[selectedPoint - 1].X, frac.Base[selectedPoint - 1].Y})
 			} else {
 				imd.Push(pixel.Vec{})
 			}
-			r, g, b := rgb(p.H, p.S, p.V)
-			imd.Color = pixel.RGBA { float64(r) / 255, float64(g)/255, float64(b)/255, 1}
 			imd.Push(pixel.Vec{p.X, p.Y})
-			imd.Line(fromScreen.X1 * 6)
+			imd.Line(fromScreen[0] * 6)
+			can.Clear(pixel.RGBA{0, 0, 0, 255})
+			imd.Draw(can)
+			can.Draw(win, canMatrix)
 		}
-		imd.Draw(can)
-		can.Draw(win, canMatrix)
 		win.Update()
 		frames++
                 select {
