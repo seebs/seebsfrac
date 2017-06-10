@@ -31,10 +31,10 @@ const (
 )
 
 var (
-	face font.Face
-	atlas *text.Atlas
+	face         font.Face
+	atlas        *text.Atlas
 	textRenderer *text.Text
-	textMatrix pixel.Matrix
+	textMatrix   pixel.Matrix
 )
 
 type Point struct {
@@ -127,7 +127,7 @@ func NewAffineBetween(p0, p1 Point) pixel.Matrix {
 	theta := math.Atan2(dy, dx)
 	sint, cost := math.Sincos(theta)
 
-	return pixel.Matrix{scale * cost, scale * sint, -scale * sint, scale * cost, p0.X, p0.Y }
+	return pixel.Matrix{scale * cost, scale * sint, -scale * sint, scale * cost, p0.X, p0.Y}
 	// x1 x2 x0   x   x'
 	// y1 y2 y0 * y = y'
 	// 0  0  1    1   1
@@ -170,9 +170,9 @@ func NewFractal(base []Point, maxOOM uint) *Fractal {
 	f := new(Fractal)
 	f.Base = base[:]
 	f.MaxOOM = maxOOM
-	f.data = make([]Point, 1 << f.MaxOOM, 1 << f.MaxOOM)
+	f.data = make([]Point, 1<<f.MaxOOM, 1<<f.MaxOOM)
 	// special case: The first depth is automatic.
-	f.data[0] = Point { Vec: pixel.Vec { X: 1, Y: 0 }}
+	f.data[0] = Point{Vec: pixel.Vec{X: 1, Y: 0}}
 	// this will be capped by MaxOOM
 	f.MaxDepth = 99
 	f.Depth = 1
@@ -227,7 +227,7 @@ func (f *Fractal) Points(depth int) []Point {
 		return nil
 	}
 	if depth == 0 {
-		return []Point { Point { Vec: pixel.Vec { X: 1, Y: 0 }, H: 330 } }
+		return []Point{Point{Vec: pixel.Vec{X: 1, Y: 0}, H: 330}}
 	}
 	return f.lines[depth]
 }
@@ -348,67 +348,67 @@ func dist(x0, y0, x1, y1 float64) float64 {
 
 func fractish() int {
 	/*
-	var mouseStart pixel.Vec
-	var pointStart pixel.Vec
-	var dragPoint int
-	var dragging bool
-	for event := sdl.PollEvent(); event != nil; event = sdl.PollEvent() {
-		switch e := event.(type) {
-		case *sdl.QuitEvent:
-			runningMutex.Lock()
-			running = false
-			runningMutex.Unlock()
-		case *sdl.MouseWheelEvent:
-			fracPortScale += e.Y
-			fracRect = frac.AdjustedBounds(fracPortRect, fracPortScale)
-			toScreen, fromScreen = NewAffinesBetween(fracRect, fracPortRect)
-		case *sdl.MouseButtonEvent:
-			// assume click is in fracPort
-			if e.X <= fracPort.X {
-				if e.Button == 1 && e.State == sdl.RELEASED {
-					if u.IsClicked(e.X, e.Y) {
-						fmt.Println("Clicked a thing!")
-					} else {
-						fmt.Println("Clicked no thing!")
-					}
-				}
-				break
-			}
-			e.X -= fracPort.X
-			e.Y -= fracPort.Y
-			if e.Button == 1 && e.State == sdl.PRESSED {
-				mouseStart.X, mouseStart.Y = fromScreen.Apply(float64(e.X), float64(e.Y))
-				new := -1
-				for i, p := range frac.Base {
-					px, py := toScreen.Apply(p.X, p.Y)
-					if dist(px, py, float64(e.X), float64(e.Y)) < 15 {
-						pointStart.X, pointStart.Y = p.X, p.Y
-						new = i
-						break
-					}
-				}
-				dragging = true
-				dragPoint = new
-				selectPoint(new)
-			} else if e.Button == 1 && e.State == sdl.RELEASED {
-				dragging = false
+		var mouseStart pixel.Vec
+		var pointStart pixel.Vec
+		var dragPoint int
+		var dragging bool
+		for event := sdl.PollEvent(); event != nil; event = sdl.PollEvent() {
+			switch e := event.(type) {
+			case *sdl.QuitEvent:
+				runningMutex.Lock()
+				running = false
+				runningMutex.Unlock()
+			case *sdl.MouseWheelEvent:
+				fracPortScale += e.Y
 				fracRect = frac.AdjustedBounds(fracPortRect, fracPortScale)
 				toScreen, fromScreen = NewAffinesBetween(fracRect, fracPortRect)
-			}
-		case *sdl.MouseMotionEvent:
-			if dragging {
+			case *sdl.MouseButtonEvent:
+				// assume click is in fracPort
+				if e.X <= fracPort.X {
+					if e.Button == 1 && e.State == sdl.RELEASED {
+						if u.IsClicked(e.X, e.Y) {
+							fmt.Println("Clicked a thing!")
+						} else {
+							fmt.Println("Clicked no thing!")
+						}
+					}
+					break
+				}
 				e.X -= fracPort.X
 				e.Y -= fracPort.Y
-				// don't allow dragging last point
-				if dragPoint >= 0 && dragPoint < len(frac.Base)-1 {
-					newX, newY := fromScreen.Apply(float64(e.X), float64(e.Y))
-					frac.Base[dragPoint].X = newX - mouseStart.X + pointStart.X
-					frac.Base[dragPoint].Y = newY - mouseStart.Y + pointStart.Y
-					frac.Changed()
+				if e.Button == 1 && e.State == sdl.PRESSED {
+					mouseStart.X, mouseStart.Y = fromScreen.Apply(float64(e.X), float64(e.Y))
+					new := -1
+					for i, p := range frac.Base {
+						px, py := toScreen.Apply(p.X, p.Y)
+						if dist(px, py, float64(e.X), float64(e.Y)) < 15 {
+							pointStart.X, pointStart.Y = p.X, p.Y
+							new = i
+							break
+						}
+					}
+					dragging = true
+					dragPoint = new
+					selectPoint(new)
+				} else if e.Button == 1 && e.State == sdl.RELEASED {
+					dragging = false
+					fracRect = frac.AdjustedBounds(fracPortRect, fracPortScale)
+					toScreen, fromScreen = NewAffinesBetween(fracRect, fracPortRect)
+				}
+			case *sdl.MouseMotionEvent:
+				if dragging {
+					e.X -= fracPort.X
+					e.Y -= fracPort.Y
+					// don't allow dragging last point
+					if dragPoint >= 0 && dragPoint < len(frac.Base)-1 {
+						newX, newY := fromScreen.Apply(float64(e.X), float64(e.Y))
+						frac.Base[dragPoint].X = newX - mouseStart.X + pointStart.X
+						frac.Base[dragPoint].Y = newY - mouseStart.Y + pointStart.Y
+						frac.Changed()
+					}
 				}
 			}
 		}
-	}
 	*/
 
 	for {
@@ -429,13 +429,13 @@ func init() {
 	textRenderer = text.New(pixel.Vec{}, atlas)
 
 	textMatrix = pixel.Matrix{
-	0: atlas.Glyph(' ').Advance,
-	3: -atlas.LineHeight(),
-	5: 800 - atlas.LineHeight(),
+		0: atlas.Glyph(' ').Advance,
+		3: -atlas.LineHeight(),
+		5: 800 - atlas.LineHeight(),
 	}
 }
 
-func textAt(t pixel.Target, at pixel.Vec, color pixel.RGBA, format string, args ... interface{}) {
+func textAt(t pixel.Target, at pixel.Vec, color pixel.RGBA, format string, args ...interface{}) {
 	at = textMatrix.Project(at)
 	textRenderer.Clear()
 	textRenderer.Color = color
@@ -448,6 +448,14 @@ func textAt(t pixel.Target, at pixel.Vec, color pixel.RGBA, format string, args 
 func run() {
 	var err error
 
+	var (
+		frames       int
+		lastFPS      int
+		totalFrames  int
+		averageFPS   float64
+		totalSeconds int
+	)
+
 	f, err := os.Create("pdata")
 	if err != nil {
 		log.Fatal(err)
@@ -458,9 +466,9 @@ func run() {
 	fracPortRect := pixel.Rect{Min: pixel.Vec{5, 5}, Max: pixel.Vec{1995, 1595}}
 	fracPortScale := int32(0)
 	base := []Point{
-		Point{pixel.Vec {0.05, 0.25}, 0, 0, 255, 255},
-		Point{pixel.Vec {0.95, -0.25}, 0, 0, 255, 255},
-		Point{pixel.Vec {1, 0}, 0, 0, 255, 255},
+		Point{pixel.Vec{0.05, 0.25}, 0, 0, 255, 255},
+		Point{pixel.Vec{0.95, -0.25}, 0, 0, 255, 255},
+		Point{pixel.Vec{1, 0}, 0, 0, 255, 255},
 	}
 	frac = NewFractal(base, 18)
 	frac.H = 330
@@ -486,14 +494,13 @@ func run() {
 
 	can := pixelgl.NewCanvas(pixel.Rect{pixel.Vec{0, 0}, pixel.Vec{2000, 1600}})
 	win.SetComposeMethod(pixel.ComposePlus)
-	canMatrix := pixel.IM.Scaled(pixel.Vec{0,0}, 0.5).Moved(pixel.Vec{700, 400})
+	canMatrix := pixel.IM.Scaled(pixel.Vec{0, 0}, 0.5).Moved(pixel.Vec{700, 400})
 
 	imd := imdraw.New(nil)
-	fracMatrix := pixel.IM.Scaled(pixel.Vec{0,0}, toScreen[0]).Moved(pixel.Vec{toScreen[4], toScreen[5]})
+	fracMatrix := pixel.IM.Scaled(pixel.Vec{0, 0}, toScreen[0]).Moved(pixel.Vec{toScreen[4], toScreen[5]})
 	imd.SetMatrix(fracMatrix)
 
 	second := time.Tick(time.Second)
-	frames := 0
 
 	for !win.Closed() {
 		scrolled := win.MouseScroll()
@@ -501,7 +508,7 @@ func run() {
 			fracPortScale += int32(scrolled.Y)
 			fracRect = frac.AdjustedBounds(fracPortRect, fracPortScale)
 			toScreen, fromScreen = NewAffinesBetween(fracRect, fracPortRect)
-			fracMatrix := pixel.IM.Scaled(pixel.Vec{0,0}, toScreen[0]).Moved(pixel.Vec{toScreen[4], toScreen[5]})
+			fracMatrix := pixel.IM.Scaled(pixel.Vec{0, 0}, toScreen[0]).Moved(pixel.Vec{toScreen[4], toScreen[5]})
 			imd.SetMatrix(fracMatrix)
 		}
 		if win.JustPressed(pixelgl.MouseButtonLeft) {
@@ -514,8 +521,8 @@ func run() {
 			pidx := -1
 			for i, p := range frac.Base {
 				pv := fracMatrix.Project(pixel.Vec{p.X, p.Y})
-				dist := math.Hypot(pv.X - c3.X, pv.Y - c3.Y)
-				if dist < leastDist {
+				dist := math.Hypot(pv.X-c3.X, pv.Y-c3.Y)
+				if dist < 30 && dist < leastDist {
 					leastDist = dist
 					leastVec = pv
 					pidx = i
@@ -528,11 +535,10 @@ func run() {
 		if frac.Depth < frac.MaxDepth-1 {
 			frac.Render(frac.Depth + 1)
 		}
-		win.Clear(pixel.RGBA{0, 0, 0, 255})
-		textAt(win, pixel.Vec{0, 0.5}, pixel.RGBA { 0, 0, 1, 1 }, "----5----+----5----+----5")
-		textAt(win, pixel.Vec{0, 0}, pixel.RGBA { 1, 0, 0, 1 }, "----5----+----5----+----5")
-		textAt(win, pixel.Vec{0, 1}, pixel.RGBA { 0, 1, 0, 1 }, "----5----+----5----+----5")
 		win.SetComposeMethod(pixel.ComposeOver)
+		win.Clear(pixel.RGBA{0, 0, 0, 255})
+		textAt(win, pixel.Vec{0, 0}, pixel.RGBA{1, 1, 1, 1}, "FPS: %d\n[%.1f avg %ds]",
+			lastFPS, averageFPS, totalSeconds)
 		can.Clear(pixel.RGBA{0, 0, 0, 255})
 		can.Draw(win, canMatrix)
 		win.SetComposeMethod(pixel.ComposePlus)
@@ -540,7 +546,7 @@ func run() {
 			imd.Clear()
 			points := frac.Points(i)
 			r, g, b := rgb(points[0].H, points[0].S, points[0].V)
-			imd.Color = pixel.RGBA { float64(r) / 255, float64(g)/255, float64(b)/255, 1}
+			imd.Color = pixel.RGBA{float64(r) / 255, float64(g) / 255, float64(b) / 255, 1}
 			imd.Push(pixel.Vec{})
 			for j := 0; j < len(points); j++ {
 				p := points[j]
@@ -555,9 +561,9 @@ func run() {
 			p := frac.Base[selectedPoint]
 			imd.Clear()
 			r, g, b := rgb(p.H, p.S, p.V)
-			imd.Color = pixel.RGBA { float64(r) / 255, float64(g)/255, float64(b)/255, 1}
+			imd.Color = pixel.RGBA{float64(r) / 255, float64(g) / 255, float64(b) / 255, 1}
 			if selectedPoint > 0 {
-				imd.Push(pixel.Vec{frac.Base[selectedPoint - 1].X, frac.Base[selectedPoint - 1].Y})
+				imd.Push(pixel.Vec{frac.Base[selectedPoint-1].X, frac.Base[selectedPoint-1].Y})
 			} else {
 				imd.Push(pixel.Vec{})
 			}
@@ -569,14 +575,18 @@ func run() {
 		}
 		win.Update()
 		frames++
-                select {
-                case <-second:
-                        fmt.Printf("FPS: %d\n", frames)
-                        frames = 0
-                default:
-                }
- 
+		select {
+		case <-second:
+			lastFPS = frames
+			totalFrames += frames
+			frames = 0
+			totalSeconds++
+			averageFPS = float64(totalFrames) / float64(totalSeconds)
+		default:
+		}
+
 	}
+	fmt.Printf("Average FPS: %.1f\n", averageFPS)
 }
 
 func main() {
