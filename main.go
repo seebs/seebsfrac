@@ -55,12 +55,14 @@ type Fractal struct {
 	Base     []Point
 	data     []Point
 	lines    [][]Point
+	Bounds   pixel.Rect
 	H, S, V  uint16 // 0-360, 0-255, 0-255
 }
 
 // indicate that we have to redraw
 func (f *Fractal) Changed() {
 	f.Depth = 0
+	f.Bounds = pixel.Rect { Min: pixel.Vec{}, Max: pixel.Vec{1, 0} }
 	f.Render(0)
 	f.Render(1)
 	f.Render(2)
@@ -68,62 +70,54 @@ func (f *Fractal) Changed() {
 	f.Render(4)
 }
 
-func (f *Fractal) Bounds() (r pixel.Rect) {
+func (f *Fractal) BoundsAt(depth int) (r pixel.Rect) {
 	r.Min.X, r.Min.Y, r.Max.X, r.Max.Y = 0, 0, 1, 0
-	for i := 0; i <= f.Depth; i++ {
-		for _, p := range f.lines[i] {
-			if p.X < r.Min.X {
-				r.Min.X = p.X
-			} else if p.X > r.Max.X {
-				r.Max.X = p.X
-			}
-			if p.Y < r.Min.Y {
-				r.Min.Y = p.Y
-			} else if p.Y > r.Max.Y {
-				r.Max.Y = p.Y
-			}
+	for _, p := range f.lines[depth] {
+		if p.X < r.Min.X {
+			r.Min.X = p.X
+		} else if p.X > r.Max.X {
+			r.Max.X = p.X
+		}
+		if p.Y < r.Min.Y {
+			r.Min.Y = p.Y
+		} else if p.Y > r.Max.Y {
+			r.Max.Y = p.Y
 		}
 	}
 	return
 }
 
 func (f *Fractal) AdjustedBounds(r0 pixel.Rect, scale int32) (r pixel.Rect) {
-	portRatio := (r0.Max.X - r0.Min.X) / (r0.Max.Y - r0.Min.Y)
-	r = f.Bounds()
-	// fmt.Printf("%#v\n", r)
-	sx, sy := r.Max.X-r.Min.X, r.Max.Y-r.Min.Y
-	if sy < .001 {
-		sy = .001
-	}
+	portRatio := r0.W() / r0.H()
+	r = f.Bounds
+	size := r.Size()
 	var dx, dy float64
-	if sy == 0 || (sx/sy) > portRatio {
-		dy = (sx / portRatio) - sy
+	if size.Y == 0 || (size.X/size.Y) > portRatio {
+		dy = (size.X / portRatio) - size.Y
 		r.Min.Y -= dy / 2
 		r.Max.Y += dy / 2
 	} else {
-		dx = (sy * portRatio) - sx
+		dx = (size.Y * portRatio) - size.X
 		r.Min.X -= dx / 2
 		r.Max.X += dx / 2
 	}
 	if scale != 0 {
-		dx = r.Max.X - r.Min.X
-		dy = r.Max.Y - r.Min.Y
+		dx, dy = r.Size().XY()
 		scaleFactor := math.Pow(0.95, float64(scale))
-		sx := dx * (scaleFactor - 1)
-		sy := dy * (scaleFactor - 1)
-		r.Min.X -= sx / 2
-		r.Max.X += sx / 2
-		r.Min.Y -= sy / 2
-		r.Max.Y += sy / 2
+		dx *= scaleFactor - 1
+		dy *= scaleFactor - 1
+		r.Min.X -= dx / 2
+		r.Max.X += dx / 2
+		r.Min.Y -= dy / 2
+		r.Max.Y += dy / 2
 	}
-	// fmt.Printf("adjusted [%.3f, %.3f, ratio %.2f vs. %.2f] %#v\n", sx, sy, sx / sy, portRatio, r)
 	return
 }
 
 func NewAffineBetween(p0, p1 Point) pixel.Matrix {
 	dx, dy := p1.X-p0.X, p1.Y-p0.Y
 
-	scale := math.Hypot(dx, dy)
+	scale := math.Sqrt(dx*dx + dy*dy)
 	theta := math.Atan2(dy, dx)
 	sint, cost := math.Sincos(theta)
 
@@ -257,6 +251,9 @@ func (f *Fractal) Render(depth int) bool {
 		prev = src[p]
 		offset += l
 	}
+	nb := f.BoundsAt(depth)
+	f.Bounds = f.Bounds.Union(nb)
+
 	if f.Depth < depth {
 		f.Depth = depth
 	}
@@ -346,77 +343,6 @@ func dist(x0, y0, x1, y1 float64) float64 {
 	return math.Sqrt(dx*dx + dy*dy)
 }
 
-func fractish() int {
-	/*
-		var mouseStart pixel.Vec
-		var pointStart pixel.Vec
-		var dragPoint int
-		var dragging bool
-		for event := sdl.PollEvent(); event != nil; event = sdl.PollEvent() {
-			switch e := event.(type) {
-			case *sdl.QuitEvent:
-				runningMutex.Lock()
-				running = false
-				runningMutex.Unlock()
-			case *sdl.MouseWheelEvent:
-				fracPortScale += e.Y
-				fracRect = frac.AdjustedBounds(fracPortRect, fracPortScale)
-				toScreen, fromScreen = NewAffinesBetween(fracRect, fracPortRect)
-			case *sdl.MouseButtonEvent:
-				// assume click is in fracPort
-				if e.X <= fracPort.X {
-					if e.Button == 1 && e.State == sdl.RELEASED {
-						if u.IsClicked(e.X, e.Y) {
-							fmt.Println("Clicked a thing!")
-						} else {
-							fmt.Println("Clicked no thing!")
-						}
-					}
-					break
-				}
-				e.X -= fracPort.X
-				e.Y -= fracPort.Y
-				if e.Button == 1 && e.State == sdl.PRESSED {
-					mouseStart.X, mouseStart.Y = fromScreen.Apply(float64(e.X), float64(e.Y))
-					new := -1
-					for i, p := range frac.Base {
-						px, py := toScreen.Apply(p.X, p.Y)
-						if dist(px, py, float64(e.X), float64(e.Y)) < 15 {
-							pointStart.X, pointStart.Y = p.X, p.Y
-							new = i
-							break
-						}
-					}
-					dragging = true
-					dragPoint = new
-					selectPoint(new)
-				} else if e.Button == 1 && e.State == sdl.RELEASED {
-					dragging = false
-					fracRect = frac.AdjustedBounds(fracPortRect, fracPortScale)
-					toScreen, fromScreen = NewAffinesBetween(fracRect, fracPortRect)
-				}
-			case *sdl.MouseMotionEvent:
-				if dragging {
-					e.X -= fracPort.X
-					e.Y -= fracPort.Y
-					// don't allow dragging last point
-					if dragPoint >= 0 && dragPoint < len(frac.Base)-1 {
-						newX, newY := fromScreen.Apply(float64(e.X), float64(e.Y))
-						frac.Base[dragPoint].X = newX - mouseStart.X + pointStart.X
-						frac.Base[dragPoint].Y = newY - mouseStart.Y + pointStart.Y
-						frac.Changed()
-					}
-				}
-			}
-		}
-	*/
-
-	for {
-	}
-
-	return 0
-}
-
 func init() {
 	var err error
 
@@ -449,11 +375,18 @@ func run() {
 	var err error
 
 	var (
-		frames       int
-		lastFPS      int
-		totalFrames  int
-		averageFPS   float64
-		totalSeconds int
+		frames         int
+		lastFPS        int
+		totalFrames    int
+		averageFPS     float64
+		totalSeconds   int
+		dragging       bool
+		dragStart      pixel.Vec
+		dragPoint      pixel.Vec
+		lastDrag       pixel.Vec
+		winScale     = pixel.Vec { X: 1000, Y: 800 }
+		canScale     = 2.0
+		margin	     = 5.0
 	)
 
 	f, err := os.Create("pdata")
@@ -463,7 +396,7 @@ func run() {
 	pprof.StartCPUProfile(f)
 	defer pprof.StopCPUProfile()
 
-	fracPortRect := pixel.Rect{Min: pixel.Vec{5, 5}, Max: pixel.Vec{1995, 1595}}
+	fracPortRect := pixel.Rect{Min: pixel.Vec{margin, margin}, Max: winScale.Scaled(canScale).Sub(pixel.Vec{margin, margin})}
 	fracPortScale := int32(0)
 	base := []Point{
 		Point{pixel.Vec{0.05, 0.25}, 0, 0, 255, 255},
@@ -478,8 +411,7 @@ func run() {
 		}
 	}
 	fracRect := frac.AdjustedBounds(fracPortRect, fracPortScale)
-	toScreen, fromScreen := NewAffinesBetween(fracRect, fracPortRect)
-	_, _ = toScreen, fromScreen
+	fracMatrix, _ := NewAffinesBetween(fracRect, fracPortRect)
 
 	cfg := pixelgl.WindowConfig{
 		Title:  "Pixel Rocks!",
@@ -497,43 +429,64 @@ func run() {
 	canMatrix := pixel.IM.Scaled(pixel.Vec{0, 0}, 0.5).Moved(pixel.Vec{700, 400})
 
 	imd := imdraw.New(nil)
-	fracMatrix := pixel.IM.Scaled(pixel.Vec{0, 0}, toScreen[0]).Moved(pixel.Vec{toScreen[4], toScreen[5]})
 	imd.SetMatrix(fracMatrix)
 
 	second := time.Tick(time.Second)
 
 	for !win.Closed() {
 		scrolled := win.MouseScroll()
+		mousePos := win.MousePosition()
+		canPos := canMatrix.Unproject(mousePos).Add(pixel.Vec{1000, 800})
 		if scrolled.Y != 0 {
 			fracPortScale += int32(scrolled.Y)
-			fracRect = frac.AdjustedBounds(fracPortRect, fracPortScale)
-			toScreen, fromScreen = NewAffinesBetween(fracRect, fracPortRect)
-			fracMatrix := pixel.IM.Scaled(pixel.Vec{0, 0}, toScreen[0]).Moved(pixel.Vec{toScreen[4], toScreen[5]})
-			imd.SetMatrix(fracMatrix)
+			if !dragging {
+				fracRect = frac.AdjustedBounds(fracPortRect, fracPortScale)
+				fracMatrix, _ = NewAffinesBetween(fracRect, fracPortRect)
+				imd.SetMatrix(fracMatrix)
+			}
 		}
 		if win.JustPressed(pixelgl.MouseButtonLeft) {
-			click := win.MousePosition()
 			// find click within the canvas space
-			c2 := canMatrix.Unproject(click)
-			c3 := c2.Add(pixel.Vec{1000, 800})
-			leastVec := pixel.Vec{}
 			leastDist := 999999.0
 			pidx := -1
 			for i, p := range frac.Base {
 				pv := fracMatrix.Project(pixel.Vec{p.X, p.Y})
-				dist := math.Hypot(pv.X-c3.X, pv.Y-c3.Y)
+				dist := math.Hypot(pv.X-canPos.X, pv.Y-canPos.Y)
 				if dist < 30 && dist < leastDist {
 					leastDist = dist
-					leastVec = pv
 					pidx = i
 				}
 			}
 			selectPoint(pidx)
-			fmt.Printf("click at %.0f, %.0f win, %.0f, %.0f canvas, %.0f, %.0f adjusted => point %d at %.1f, %.1f, %.1f px away\n",
-				click.X, click.Y, c2.X, c2.Y, c3.X, c3.Y, pidx, leastVec.X, leastVec.Y, leastDist)
+			if pidx > -1 {
+				dragStart = fracMatrix.Unproject(canPos)
+				dragPoint = frac.Base[pidx].Vec
+				lastDrag = dragPoint
+				dragging = true
+			}
+		} else if win.JustReleased(pixelgl.MouseButtonLeft) {
+			if dragging {
+				fracRect = frac.AdjustedBounds(fracPortRect, fracPortScale)
+				fracMatrix, _ = NewAffinesBetween(fracRect, fracPortRect)
+				imd.SetMatrix(fracMatrix)
+			}
+			dragging = false
+		}
+		if dragging {
+			current := fracMatrix.Unproject(canPos)
+			if current != lastDrag {
+				frac.Base[selectedPoint].Vec = dragPoint.Add(current.Sub(dragStart))
+				frac.Changed()
+				lastDrag = current
+			}
 		}
 		if frac.Depth < frac.MaxDepth-1 {
 			frac.Render(frac.Depth + 1)
+			if !dragging {
+				fracRect = frac.AdjustedBounds(fracPortRect, fracPortScale)
+				fracMatrix, _ = NewAffinesBetween(fracRect, fracPortRect)
+				imd.SetMatrix(fracMatrix)
+			}
 		}
 		win.SetComposeMethod(pixel.ComposeOver)
 		win.Clear(pixel.RGBA{0, 0, 0, 255})
@@ -552,7 +505,7 @@ func run() {
 				p := points[j]
 				imd.Push(pixel.Vec{p.X, p.Y})
 			}
-			imd.Line(fromScreen[0] * 2)
+			imd.Line(2 / fracMatrix[0])
 			imd.Draw(can)
 			can.Draw(win, canMatrix)
 			can.Clear(pixel.RGBA{0, 0, 0, 255})
@@ -568,7 +521,7 @@ func run() {
 				imd.Push(pixel.Vec{})
 			}
 			imd.Push(pixel.Vec{p.X, p.Y})
-			imd.Line(fromScreen[0] * 6)
+			imd.Line(6 / fracMatrix[0])
 			imd.Draw(can)
 			can.Draw(win, canMatrix)
 			can.Clear(pixel.RGBA{0, 0, 0, 255})
