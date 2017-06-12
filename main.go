@@ -52,6 +52,7 @@ type Fractal struct {
 	MaxDepth int
 	Depth    int
 	MaxOOM   uint
+	Total    int
 	Base     []Point
 	data     []Point
 	lines    [][]Point
@@ -137,6 +138,7 @@ func NewAffinesBetween(r0, r1 pixel.Rect) (to, from pixel.Matrix) {
 }
 
 func (f *Fractal) Alloc() {
+	f.MaxDepth = 20
 	totals := make([]int, f.MaxDepth)
 	total := 0
 	size := 1
@@ -149,6 +151,7 @@ func (f *Fractal) Alloc() {
 			f.MaxDepth = i + 1
 		}
 	}
+	f.Total = total
 	f.lines = make([][]Point, f.MaxDepth)
 	prev := 0
 	fmt.Printf("%d points, %d depth, %d total size.\n", len(f.Base), f.MaxDepth, total)
@@ -168,7 +171,6 @@ func NewFractal(base []Point, maxOOM uint) *Fractal {
 	// special case: The first depth is automatic.
 	f.data[0] = Point{Vec: pixel.Vec{X: 1, Y: 0}}
 	// this will be capped by MaxOOM
-	f.MaxDepth = 99
 	f.Depth = 1
 	f.Alloc()
 	return f
@@ -346,7 +348,7 @@ func dist(x0, y0, x1, y1 float64) float64 {
 func init() {
 	var err error
 
-	face, err = loadTTF("Go-Mono.ttf", 20)
+	face, err = loadTTF("Go-Mono.ttf", 18)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -490,8 +492,12 @@ func run() {
 		}
 		win.SetComposeMethod(pixel.ComposeOver)
 		win.Clear(pixel.RGBA{0, 0, 0, 255})
-		textAt(win, pixel.Vec{0, 0}, pixel.RGBA{1, 1, 1, 1}, "FPS: %d\n[%.1f avg %ds]",
-			lastFPS, averageFPS, totalSeconds)
+		textAt(win, pixel.Vec{0, 0}, pixel.RGBA{1, 1, 1, 1},
+			"Depth: %d/%d", frac.Depth, frac.MaxDepth - 1)
+		textAt(win, pixel.Vec{0, 1}, pixel.RGBA{1, 1, 1, 1},
+			"Points: %d", frac.Total)
+		textAt(win, pixel.Vec{0, 30}, pixel.RGBA{1, 1, 1, 1},
+			"FPS: %d\n[%.1f avg %ds]", lastFPS, averageFPS, totalSeconds)
 		can.Clear(pixel.RGBA{0, 0, 0, 255})
 		can.Draw(win, canMatrix)
 		win.SetComposeMethod(pixel.ComposePlus)
