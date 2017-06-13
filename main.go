@@ -553,6 +553,7 @@ func button(at pixel.Vec, name string, callback func(), format string, args ...i
 	// draw instruction will center on point, rather than originating at point
 	center := at.Add(spriteBounds.Size().Scaled(0.5))
 	UIElements[name] = &UIElement{
+		enabled: true,
 		color: pixel.RGBA{1, 1, 1, 1},
 		baseColor: pixel.RGBA{1, 1, 1, 1},
 		bounds: pixel.Rect{Min: at, Max: spriteBounds.Size().Add(at) },
