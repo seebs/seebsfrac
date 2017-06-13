@@ -374,7 +374,7 @@ func init() {
 type UIElement struct {
 	bounds    pixel.Rect
 	matrix    pixel.Matrix
-	callback  func(*UIElement, int)
+	callback  func()
 	sprite    *pixel.Sprite
 	color     pixel.RGBA
 	baseColor pixel.RGBA
@@ -422,13 +422,14 @@ func (u *UIElement) Unpressed() {
 func (u *UIElement) Release() {
 	u.Dim(false)
 	u.state = Unpressed
-	u.callback(u, Released)
+	u.callback()
 }
 
-func button(at pixel.Vec, name string, callback func (*UIElement, int), format string, args ...interface{}) {
+func button(at pixel.Vec, name string, callback func(), format string, args ...interface{}) {
 	descent := atlas.Descent()
 	if buttonCanvas == nil {
 		buttonCanvas = pixelgl.NewCanvas(pixel.Rect { Min: pixel.Vec { 0, 0 }, Max: pixel.Vec { buttonCanvasSize, buttonCanvasSize } })
+		buttonCanvas.Clear(pixel.RGBA{0, .2, 0, 1})
 		uiBatch = pixel.NewBatch(&pixel.TrianglesData{}, buttonCanvas)
 		buttonDot.Y = descent
 	}
@@ -454,7 +455,7 @@ func button(at pixel.Vec, name string, callback func (*UIElement, int), format s
 	UIElements[name] = &UIElement{
 		color: pixel.RGBA{1, 1, 1, 1},
 		baseColor: pixel.RGBA{1, 1, 1, 1},
-		bounds: spriteBounds.Moved(at),
+		bounds: pixel.Rect{Min: at, Max: spriteBounds.Size().Add(at) },
 		callback: callback,
 		sprite: sprite,
 		matrix: pixel.IM.Moved(center),
@@ -476,10 +477,6 @@ func textAt(t pixel.Target, at pixel.Vec, color pixel.RGBA, format string, args 
 
 func (u UIElement) String() string {
 	return fmt.Sprintf("[%s]", u.label)
-}
-
-func testFunc(u *UIElement, state int) {
-	fmt.Printf("got here: %s: %d\n", u, state)
 }
 
 func run() {
@@ -544,7 +541,8 @@ func run() {
 
 	second := time.Tick(time.Second)
 
-	button(pixel.Vec{50, 50}, "test", testFunc, "+")
+	button(pixel.Vec{30, 50}, "DelPoint", func() { frac.DelPoint(selectedPoint) }, "-")
+	button(pixel.Vec{50, 50}, "AddPoint", func() { fmt.Println("y"); frac.AddPoint(selectedPoint) }, "+")
 
 	for !win.Closed() {
 		scrolled := win.MouseScroll()
@@ -568,7 +566,7 @@ func run() {
 				}
 			}
 			
-			if !found {
+			if !found && canPos.X >= 0 {
 				// find click within the canvas space
 				leastDist := 999999.0
 				pidx := -1
