@@ -30,6 +30,13 @@ const (
 	FixedV
 )
 
+const (
+	Released = iota
+	Pressed
+	Unpressed
+	Dragging
+)
+
 var (
 	face         font.Face
 	atlas        *text.Atlas
@@ -69,6 +76,7 @@ func (f *Fractal) Changed() {
 	f.Render(2)
 	f.Render(3)
 	f.Render(4)
+	f.Render(5)
 }
 
 func (f *Fractal) BoundsAt(depth int) (r pixel.Rect) {
@@ -363,14 +371,115 @@ func init() {
 	}
 }
 
-func textAt(t pixel.Target, at pixel.Vec, color pixel.RGBA, format string, args ...interface{}) {
+type UIElement struct {
+	bounds    pixel.Rect
+	matrix    pixel.Matrix
+	callback  func(*UIElement, int)
+	sprite    *pixel.Sprite
+	color     pixel.RGBA
+	baseColor pixel.RGBA
+	label     string
+	dimmed    bool
+	state     int
+}
+
+var (
+	buttonCanvasSize = 512.0
+	buttonCanvas     *pixelgl.Canvas
+	buttonDot	 pixel.Vec
+	UIElements       map[string]*UIElement
+	uiBatch          *pixel.Batch
+)
+
+func init() {
+	UIElements = make(map[string]*UIElement)
+}
+
+func (u *UIElement) SetColor(color pixel.RGBA) {
+	u.baseColor = color
+	u.Dim(u.dimmed)
+}
+
+func (u *UIElement) Dim(state bool) {
+	u.dimmed = state
+	if u.dimmed {
+		u.color = u.baseColor.Scaled(0.7)
+	} else {
+		u.color = u.baseColor
+	}
+}
+
+func (u *UIElement) Press() {
+	u.Dim(true)
+	u.state = Pressed
+}
+
+func (u *UIElement) Unpressed() {
+	u.Dim(false)
+	u.state = Unpressed
+}
+
+func (u *UIElement) Release() {
+	u.Dim(false)
+	u.state = Unpressed
+	u.callback(u, Released)
+}
+
+func button(at pixel.Vec, name string, callback func (*UIElement, int), format string, args ...interface{}) {
+	descent := atlas.Descent()
+	if buttonCanvas == nil {
+		buttonCanvas = pixelgl.NewCanvas(pixel.Rect { Min: pixel.Vec { 0, 0 }, Max: pixel.Vec { buttonCanvasSize, buttonCanvasSize } })
+		uiBatch = pixel.NewBatch(&pixel.TrianglesData{}, buttonCanvas)
+		buttonDot.Y = descent
+	}
+	textRenderer.Clear()
+	textRenderer.Color = pixel.RGBA{1, 1, 1, 1}
+	textRenderer.Orig = pixel.Vec{0, descent}
+	textRenderer.Dot = textRenderer.Orig
+	label := fmt.Sprintf(format, args...)
+	textSize := textRenderer.BoundsOf(label)
+	if textSize.Max.X + buttonDot.X > buttonCanvasSize {
+		buttonDot.Y += textSize.Max.Y + descent + 2
+		buttonDot.X = 0
+	}
+	textRenderer.Orig = buttonDot
+	textRenderer.Dot = textRenderer.Orig
+	textRenderer.WriteString(label)
+	textRenderer.Draw(buttonCanvas, pixel.IM)
+	buttonDot.X += textSize.W() + 2
+	spriteBounds := textRenderer.Bounds()
+	sprite := pixel.NewSprite(buttonCanvas, spriteBounds)
+	// draw instruction will center on point, rather than originating at point
+	center := at.Add(spriteBounds.Size().Scaled(0.5))
+	UIElements[name] = &UIElement{
+		color: pixel.RGBA{1, 1, 1, 1},
+		baseColor: pixel.RGBA{1, 1, 1, 1},
+		bounds: spriteBounds.Moved(at),
+		callback: callback,
+		sprite: sprite,
+		matrix: pixel.IM.Moved(center),
+		label: label,
+	}
+}
+
+func textAt(t pixel.Target, at pixel.Vec, color pixel.RGBA, format string, args ...interface{}) pixel.Rect {
 	at = textMatrix.Project(at)
 	textRenderer.Clear()
 	textRenderer.Color = color
 	textRenderer.Orig = at
 	textRenderer.Dot = textRenderer.Orig
 	fmt.Fprintf(textRenderer, format, args...)
+	bounds := textRenderer.Bounds().Moved(at)
 	textRenderer.Draw(t, pixel.IM)
+	return bounds
+}
+
+func (u UIElement) String() string {
+	return fmt.Sprintf("[%s]", u.label)
+}
+
+func testFunc(u *UIElement, state int) {
+	fmt.Printf("got here: %s: %d\n", u, state)
 }
 
 func run() {
@@ -435,6 +544,8 @@ func run() {
 
 	second := time.Tick(time.Second)
 
+	button(pixel.Vec{50, 50}, "test", testFunc, "+")
+
 	for !win.Closed() {
 		scrolled := win.MouseScroll()
 		mousePos := win.MousePosition()
@@ -448,25 +559,45 @@ func run() {
 			}
 		}
 		if win.JustPressed(pixelgl.MouseButtonLeft) {
-			// find click within the canvas space
-			leastDist := 999999.0
-			pidx := -1
-			for i, p := range frac.Base {
-				pv := fracMatrix.Project(pixel.Vec{p.X, p.Y})
-				dist := math.Hypot(pv.X-canPos.X, pv.Y-canPos.Y)
-				if dist < 30 && dist < leastDist {
-					leastDist = dist
-					pidx = i
+			found := false
+			for _, element := range UIElements {
+				if element.bounds.Contains(mousePos) {
+					element.Press()
+					found = true
+					break
 				}
 			}
-			selectPoint(pidx)
-			if pidx > -1 {
-				dragStart = fracMatrix.Unproject(canPos)
-				dragPoint = frac.Base[pidx].Vec
-				lastDrag = dragPoint
-				dragging = true
+			
+			if !found {
+				// find click within the canvas space
+				leastDist := 999999.0
+				pidx := -1
+				for i, p := range frac.Base {
+					pv := fracMatrix.Project(pixel.Vec{p.X, p.Y})
+					dist := math.Hypot(pv.X-canPos.X, pv.Y-canPos.Y)
+					if dist < 30 && dist < leastDist {
+						leastDist = dist
+						pidx = i
+					}
+				}
+				selectPoint(pidx)
+				if pidx > -1 {
+					dragStart = fracMatrix.Unproject(canPos)
+					dragPoint = frac.Base[pidx].Vec
+					lastDrag = dragPoint
+					dragging = true
+				}
 			}
 		} else if win.JustReleased(pixelgl.MouseButtonLeft) {
+			for _, element := range UIElements {
+				if element.bounds.Contains(mousePos) {
+					element.Release()
+				} else if element.state == Pressed {
+					// if we find an element which is in Pressed
+					// state, and we are not pressing it, let it know.
+					element.Unpressed()
+				}
+			}
 			if dragging {
 				fracRect = frac.AdjustedBounds(fracPortRect, fracPortScale)
 				fracMatrix, _ = NewAffinesBetween(fracRect, fracPortRect)
@@ -482,13 +613,11 @@ func run() {
 				lastDrag = current
 			}
 		}
-		if frac.Depth < frac.MaxDepth-1 {
+		if frac.Depth < frac.MaxDepth-1 && !dragging {
 			frac.Render(frac.Depth + 1)
-			if !dragging {
-				fracRect = frac.AdjustedBounds(fracPortRect, fracPortScale)
-				fracMatrix, _ = NewAffinesBetween(fracRect, fracPortRect)
-				imd.SetMatrix(fracMatrix)
-			}
+			fracRect = frac.AdjustedBounds(fracPortRect, fracPortScale)
+			fracMatrix, _ = NewAffinesBetween(fracRect, fracPortRect)
+			imd.SetMatrix(fracMatrix)
 		}
 		win.SetComposeMethod(pixel.ComposeOver)
 		win.Clear(pixel.RGBA{0, 0, 0, 255})
@@ -496,6 +625,20 @@ func run() {
 			"Depth: %d/%d", frac.Depth, frac.MaxDepth - 1)
 		textAt(win, pixel.Vec{0, 1}, pixel.RGBA{1, 1, 1, 1},
 			"Points: %d", frac.Total)
+		textAt(win, pixel.Vec{0, 2}, pixel.RGBA{1, 1, 1, 1},
+			"Scale: %d", fracPortScale)
+		uiBatch.Clear()
+		for _, e := range UIElements {
+			e.sprite.DrawColorMask(uiBatch, e.matrix, e.color)
+		}
+		uiBatch.Draw(win)
+		if selectedPoint >= 0 {
+			p := frac.Base[selectedPoint]
+			textAt(win, pixel.Vec{0, 4}, pixel.RGBA{.7, .7, .7, 1},
+				"Point: %d", selectedPoint + 1)
+			textAt(win, pixel.Vec{0, 5}, pixel.RGBA{.7, .7, .7, 1},
+				"X: %-+6.3f Y: %-+6.3f", p.X, p.Y)
+		}
 		textAt(win, pixel.Vec{0, 30}, pixel.RGBA{1, 1, 1, 1},
 			"FPS: %d\n[%.1f avg %ds]", lastFPS, averageFPS, totalSeconds)
 		can.Clear(pixel.RGBA{0, 0, 0, 255})
