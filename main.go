@@ -55,16 +55,17 @@ func (p Point) GoString() string {
 }
 
 type Fractal struct {
-	dataSize int
-	MaxDepth int
-	Depth    int
-	MaxOOM   uint
-	Total    int
-	Base     []Point
-	data     []Point
-	lines    [][]Point
-	Bounds   pixel.Rect
-	H, S, V  uint16 // 0-360, 0-255, 0-255
+	dataSize      int
+	MaxDepth      int
+	Depth         int
+	MaxOOM        uint
+	Total         int
+	Base          []Point
+	data          []Point
+	lines         [][]Point
+	Bounds        pixel.Rect
+	H, S, V       uint16 // 0-360, 0-255, 0-255
+	selectedPoint int
 }
 
 // indicate that we have to redraw
@@ -174,6 +175,7 @@ func (f *Fractal) Alloc() {
 func NewFractal(base []Point, maxOOM uint) *Fractal {
 	f := new(Fractal)
 	f.Base = base[:]
+	f.selectedPoint = -1
 	f.MaxOOM = maxOOM
 	f.data = make([]Point, 1<<f.MaxOOM, 1<<f.MaxOOM)
 	// special case: The first depth is automatic.
@@ -184,16 +186,50 @@ func NewFractal(base []Point, maxOOM uint) *Fractal {
 	return f
 }
 
-func (f *Fractal) AddPoint(beforePoint int) {
+func (f *Fractal) FlipXPoint() {
+	if f.selectedPoint < 0 || f.selectedPoint >= len(f.Base) {
+		return
+	}
+	f.Base[f.selectedPoint].Flags ^= FlipX
+	f.SelectPoint(f.selectedPoint)
+	f.Changed()
+}
+
+func (f *Fractal) FlipYPoint() {
+	if f.selectedPoint < 0 || f.selectedPoint >= len(f.Base) {
+		return
+	}
+	f.Base[f.selectedPoint].Flags ^= FlipY
+	f.SelectPoint(f.selectedPoint)
+	f.Changed()
+}
+
+func (f *Fractal) PrunePoint() {
+	if f.selectedPoint < 0 || f.selectedPoint >= len(f.Base) {
+		return
+	}
+	f.Base[f.selectedPoint].Flags ^= Prune
+	f.SelectPoint(f.selectedPoint)
+}
+
+func (f *Fractal) HidePoint() {
+	if f.selectedPoint < 0 || f.selectedPoint >= len(f.Base) {
+		return
+	}
+	f.Base[f.selectedPoint].Flags ^= Hide
+	f.SelectPoint(f.selectedPoint)
+}
+
+func (f *Fractal) AddPoint() {
 	// cap size
-	if len(f.Base) >= 6 || beforePoint < 0 || beforePoint > len(f.Base) {
+	if len(f.Base) >= 6 || f.selectedPoint < 0 || f.selectedPoint >= len(f.Base) {
 		return
 	}
 	newbase := make([]Point, len(f.Base)+1)
 	j := 0
 	prev := Point{}
 	for i, p := range f.Base {
-		if i == beforePoint {
+		if i == f.selectedPoint {
 			newPoint := p
 			newPoint.X = (p.X + prev.X) / 2
 			newPoint.Y = (p.Y + prev.Y) / 2
@@ -209,15 +245,15 @@ func (f *Fractal) AddPoint(beforePoint int) {
 	f.Alloc()
 }
 
-func (f *Fractal) DelPoint(point int) {
+func (f *Fractal) DelPoint() {
 	// cap size
-	if len(f.Base) < 2 || point < 0 || point > len(f.Base) {
+	if len(f.Base) < 2 || f.selectedPoint < 0 || f.selectedPoint > len(f.Base) {
 		return
 	}
 	newbase := make([]Point, len(f.Base)-1)
 	j := 0
 	for i, p := range f.Base {
-		if i != point {
+		if i != f.selectedPoint {
 			newbase[j] = p
 			j++
 		}
@@ -272,13 +308,18 @@ func (f *Fractal) Render(depth int) bool {
 
 func (f *Fractal) Partial(p0 Point, p1 Point, dest []Point) {
 	a := NewAffineBetween(p0, p1)
+	flipY := p1.Flags & FlipY != 0
 
 	for i := 0; i < len(f.Base); i++ {
 		p := f.Base[i]
+		if flipY {
+			p.Y *= -1
+		}
 		dest[i].Vec = a.Project(p.Vec)
 		dest[i].H = (p.H + p1.H + (f.H / uint16(f.MaxDepth))) % 360
 		dest[i].S = p.S
 		dest[i].V = p.V
+		dest[i].Flags = p.Flags ^ (p1.Flags & (FlipX | FlipY))
 		// fmt.Printf("... point %d: %v\n", i, dest[i])
 	}
 }
@@ -337,14 +378,31 @@ func rgb(h, s, v uint16) (r, g, b uint16) {
 	return
 }
 
-var selectedPoint = -1
 var frac *Fractal
 
-func selectPoint(p int) {
-	if p >= 0 && p < len(frac.Base) {
-		selectedPoint = p
+func (p *Point) UIFlag(label string, flag int) {
+	e := UIElements[label]
+	if e != nil {
+		e.BoolColor(p.Flags & flag != 0)
+		e.SetEnabled(true)
+	}
+}
+
+func (f *Fractal)SelectPoint(index int) {
+	if index >= 0 && index < len(f.Base) {
+		f.selectedPoint = index
+		p := f.Base[index]
+		p.UIFlag("FlipX", FlipX)
+		p.UIFlag("FlipY", FlipY)
+		p.UIFlag("Hide", Hide)
+		p.UIFlag("Prune", Prune)
 	} else {
-		selectedPoint = -1
+		f.selectedPoint = -1
+		grey := pixel.RGBA { 0.5, 0.5, 0.5, 1.0 }
+		UIElements["FlipX"].SetColor(grey)
+		UIElements["FlipY"].SetColor(grey)
+		UIElements["Hide"].SetColor(grey)
+		UIElements["Prune"].SetColor(grey)
 	}
 }
 
@@ -381,6 +439,7 @@ type UIElement struct {
 	label     string
 	dimmed    bool
 	state     int
+	enabled   bool
 }
 
 var (
@@ -397,30 +456,53 @@ func init() {
 
 func (u *UIElement) SetColor(color pixel.RGBA) {
 	u.baseColor = color
-	u.Dim(u.dimmed)
+	u.Colorize()
 }
 
-func (u *UIElement) Dim(state bool) {
-	u.dimmed = state
-	if u.dimmed {
-		u.color = u.baseColor.Scaled(0.7)
+func (u *UIElement) BoolColor(flag bool) {
+	if flag {
+		u.SetColor(pixel.RGBA{0, .7, 0, 1})
 	} else {
-		u.color = u.baseColor
+		u.SetColor(pixel.RGBA{0, 0, 1, 1})
 	}
 }
 
+func (u *UIElement) Colorize() {
+	scale := 1.0
+	if u.dimmed {
+		scale *= 0.7;
+	}
+	if !u.enabled {
+		scale *= 0.5;
+	}
+	u.color = u.baseColor.Scaled(scale)
+}
+
+func (u *UIElement) SetEnabled(state bool) {
+	u.enabled = state
+	if !u.enabled {
+		u.Unpressed()
+	}
+	u.Colorize()
+}
+
+func (u *UIElement) SetDimmed(state bool) {
+	u.dimmed = state
+	u.Colorize()
+}
+
 func (u *UIElement) Press() {
-	u.Dim(true)
+	u.SetDimmed(true)
 	u.state = Pressed
 }
 
 func (u *UIElement) Unpressed() {
-	u.Dim(false)
+	u.SetDimmed(false)
 	u.state = Unpressed
 }
 
 func (u *UIElement) Release() {
-	u.Dim(false)
+	u.SetDimmed(false)
 	u.state = Unpressed
 	u.callback()
 }
@@ -429,7 +511,7 @@ func button(at pixel.Vec, name string, callback func(), format string, args ...i
 	descent := atlas.Descent()
 	if buttonCanvas == nil {
 		buttonCanvas = pixelgl.NewCanvas(pixel.Rect { Min: pixel.Vec { 0, 0 }, Max: pixel.Vec { buttonCanvasSize, buttonCanvasSize } })
-		buttonCanvas.Clear(pixel.RGBA{0, .2, 0, 1})
+		// buttonCanvas.Clear(pixel.RGBA{0, .2, 0, 1})
 		uiBatch = pixel.NewBatch(&pixel.TrianglesData{}, buttonCanvas)
 		buttonDot.Y = descent
 	}
@@ -541,8 +623,12 @@ func run() {
 
 	second := time.Tick(time.Second)
 
-	button(pixel.Vec{30, 50}, "DelPoint", func() { frac.DelPoint(selectedPoint) }, "-")
-	button(pixel.Vec{50, 50}, "AddPoint", func() { fmt.Println("y"); frac.AddPoint(selectedPoint) }, "+")
+	button(pixel.Vec{30, 50}, "DelPoint", func() { frac.DelPoint() }, "-")
+	button(pixel.Vec{50, 50}, "AddPoint", func() { frac.AddPoint() }, "+")
+	button(pixel.Vec{10, 70}, "FlipX", func() { frac.FlipXPoint() }, "FlipX")
+	button(pixel.Vec{80, 70}, "FlipY", func() { frac.FlipYPoint() }, "FlipY")
+	button(pixel.Vec{10, 90}, "Hide", func() { frac.HidePoint() }, "Hide")
+	button(pixel.Vec{80, 90}, "Prune", func() { frac.PrunePoint() }, "Prune")
 
 	for !win.Closed() {
 		scrolled := win.MouseScroll()
@@ -559,7 +645,7 @@ func run() {
 		if win.JustPressed(pixelgl.MouseButtonLeft) {
 			found := false
 			for _, element := range UIElements {
-				if element.bounds.Contains(mousePos) {
+				if element.bounds.Contains(mousePos) && element.enabled {
 					element.Press()
 					found = true
 					break
@@ -578,7 +664,7 @@ func run() {
 						pidx = i
 					}
 				}
-				selectPoint(pidx)
+				frac.SelectPoint(pidx)
 				if pidx > -1 {
 					dragStart = fracMatrix.Unproject(canPos)
 					dragPoint = frac.Base[pidx].Vec
@@ -588,12 +674,14 @@ func run() {
 			}
 		} else if win.JustReleased(pixelgl.MouseButtonLeft) {
 			for _, element := range UIElements {
-				if element.bounds.Contains(mousePos) {
-					element.Release()
-				} else if element.state == Pressed {
+				if element.state == Pressed {
 					// if we find an element which is in Pressed
 					// state, and we are not pressing it, let it know.
-					element.Unpressed()
+					if element.bounds.Contains(mousePos) {
+						element.Release()
+					} else {
+						element.Unpressed()
+					}
 				}
 			}
 			if dragging {
@@ -606,8 +694,10 @@ func run() {
 		if dragging {
 			current := fracMatrix.Unproject(canPos)
 			if current != lastDrag {
-				frac.Base[selectedPoint].Vec = dragPoint.Add(current.Sub(dragStart))
-				frac.Changed()
+				if frac.selectedPoint >= 0 && frac.selectedPoint < len(frac.Base) {
+					frac.Base[frac.selectedPoint].Vec = dragPoint.Add(current.Sub(dragStart))
+					frac.Changed()
+				}
 				lastDrag = current
 			}
 		}
@@ -630,10 +720,10 @@ func run() {
 			e.sprite.DrawColorMask(uiBatch, e.matrix, e.color)
 		}
 		uiBatch.Draw(win)
-		if selectedPoint >= 0 {
-			p := frac.Base[selectedPoint]
+		if frac.selectedPoint >= 0 {
+			p := frac.Base[frac.selectedPoint]
 			textAt(win, pixel.Vec{0, 4}, pixel.RGBA{.7, .7, .7, 1},
-				"Point: %d", selectedPoint + 1)
+				"Point: %d", frac.selectedPoint + 1)
 			textAt(win, pixel.Vec{0, 5}, pixel.RGBA{.7, .7, .7, 1},
 				"X: %-+6.3f Y: %-+6.3f", p.X, p.Y)
 		}
@@ -657,13 +747,13 @@ func run() {
 			can.Draw(win, canMatrix)
 			can.Clear(pixel.RGBA{0, 0, 0, 255})
 		}
-		if selectedPoint >= 0 {
-			p := frac.Base[selectedPoint]
+		if frac.selectedPoint >= 0 {
+			p := frac.Base[frac.selectedPoint]
 			imd.Clear()
 			r, g, b := rgb(p.H, p.S, p.V)
 			imd.Color = pixel.RGBA{float64(r) / 255, float64(g) / 255, float64(b) / 255, 1}
-			if selectedPoint > 0 {
-				imd.Push(pixel.Vec{frac.Base[selectedPoint-1].X, frac.Base[selectedPoint-1].Y})
+			if frac.selectedPoint > 0 {
+				imd.Push(pixel.Vec{frac.Base[frac.selectedPoint-1].X, frac.Base[frac.selectedPoint-1].Y})
 			} else {
 				imd.Push(pixel.Vec{})
 			}
