@@ -61,6 +61,7 @@ type Fractal struct {
 	MaxOOM        uint
 	Total         int
 	Base          []Point
+	Inverse       []Point
 	data          []Point
 	lines         [][]Point
 	Bounds        pixel.Rect
@@ -70,6 +71,16 @@ type Fractal struct {
 
 // indicate that we have to redraw
 func (f *Fractal) Changed() {
+	// compute an inverted base.
+	// first point is the last point's non-position values, and the next-to-last point's
+	// location, with X flipped around 0-1, etcetera, last point is the first point's
+	// values and {1, 0}
+	prev := pixel.Vec{0, 0}
+	f.Inverse = make([]Point, len(f.Base))
+	for i, p := range(f.Base) {
+		p.Vec, prev = pixel.Vec{1 - prev.X, prev.Y}, p.Vec
+		f.Inverse[len(f.Base) - 1 - i] = p
+	}
 	f.Depth = 0
 	f.Bounds = pixel.Rect { Min: pixel.Vec{}, Max: pixel.Vec{1, 0} }
 	f.Render(0)
@@ -307,11 +318,18 @@ func (f *Fractal) Render(depth int) bool {
 }
 
 func (f *Fractal) Partial(p0 Point, p1 Point, dest []Point) {
-	a := NewAffineBetween(p0, p1)
 	flipY := p1.Flags & FlipY != 0
+	flipX := p1.Flags & FlipX != 0
+	a := NewAffineBetween(p0, p1)
+	var base []Point
+	if flipX {
+		base = f.Inverse
+	} else {
+		base = f.Base
+	}
 
-	for i := 0; i < len(f.Base); i++ {
-		p := f.Base[i]
+	for i := 0; i < len(base); i++ {
+		p := base[i]
 		if flipY {
 			p.Y *= -1
 		}
