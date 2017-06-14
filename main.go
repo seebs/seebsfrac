@@ -30,10 +30,13 @@ const (
 	FixedV
 )
 
+// Mouse activity states. A button starts out Unpressed, then is Pressed,
+// may experience Dragging, and is either Unpressed (event cancelled) or
+// Released (callback happens).
 const (
-	Released = iota
+	Unpressed = iota
 	Pressed
-	Unpressed
+	Released
 	Dragging
 )
 
@@ -44,16 +47,19 @@ var (
 	textMatrix   pixel.Matrix
 )
 
+// Point represents... actually a line segment, I'm great at this.
 type Point struct {
 	pixel.Vec
 	Flags   int
 	H, S, V uint16 // 0-360, 0-255, 0-255
 }
 
-func (p Point) GoString() string {
+func (p Point) String() string {
 	return fmt.Sprintf("%.3f, %.3f, 0x%03x, %d/%d/%d", p.X, p.Y, p.Flags, p.H, p.S, p.V)
 }
 
+// Fractal represents both the underlying data and the current rendered state,
+// which in retrospect is a bad decision.
 type Fractal struct {
 	dataSize      int
 	MaxDepth      int
@@ -69,7 +75,7 @@ type Fractal struct {
 	selectedPoint int
 }
 
-// indicate that we have to redraw
+// Changed causes re-rendering of a fractal.
 func (f *Fractal) Changed() {
 	// compute an inverted base.
 	// first point is the last point's non-position values, and the next-to-last point's
@@ -91,6 +97,7 @@ func (f *Fractal) Changed() {
 	f.Render(5)
 }
 
+// BoundsAt allows us to compute partial bounds for a given tier.
 func (f *Fractal) BoundsAt(depth int) (r pixel.Rect) {
 	r.Min.X, r.Min.Y, r.Max.X, r.Max.Y = 0, 0, 1, 0
 	for _, p := range f.lines[depth] {
@@ -108,6 +115,8 @@ func (f *Fractal) BoundsAt(depth int) (r pixel.Rect) {
 	return
 }
 
+// AdjustedBounds produces the current bounds, adjusted to the aspect ratio
+// of r0, and scaled by a scale factor.
 func (f *Fractal) AdjustedBounds(r0 pixel.Rect, scale int32) (r pixel.Rect) {
 	portRatio := r0.W() / r0.H()
 	r = f.Bounds
@@ -135,6 +144,7 @@ func (f *Fractal) AdjustedBounds(r0 pixel.Rect, scale int32) (r pixel.Rect) {
 	return
 }
 
+// NewAffineBetween gives an affine transform that maps [0,0]->[1,0] onto the line segment between the given points.
 func NewAffineBetween(p0, p1 Point) pixel.Matrix {
 	dx, dy := p1.X-p0.X, p1.Y-p0.Y
 
@@ -148,6 +158,8 @@ func NewAffineBetween(p0, p1 Point) pixel.Matrix {
 	// 0  0  1    1   1
 }
 
+// NewAffinesBetween attempts to build affine matrixes to convert linearly between
+// the given Rects. It is unnecessary, because Unproject() exists.
 func NewAffinesBetween(r0, r1 pixel.Rect) (to, from pixel.Matrix) {
 	s0 := r0.Size()
 	s1 := r1.Size()
@@ -157,6 +169,8 @@ func NewAffinesBetween(r0, r1 pixel.Rect) (to, from pixel.Matrix) {
 	return
 }
 
+// Alloc reallocates the fractal's point/line storage, and should be needed
+// only when the number of points at each depth changes.
 func (f *Fractal) Alloc() {
 	f.MaxDepth = 20
 	totals := make([]int, f.MaxDepth)
@@ -183,6 +197,7 @@ func (f *Fractal) Alloc() {
 	f.Changed()
 }
 
+// NewFractal allocates a fractal.
 func NewFractal(base []Point, maxOOM uint) *Fractal {
 	f := new(Fractal)
 	f.Base = base[:]
@@ -197,6 +212,7 @@ func NewFractal(base []Point, maxOOM uint) *Fractal {
 	return f
 }
 
+// FlipXPoint sets the FlipX bit for selectedPoint.
 func (f *Fractal) FlipXPoint() {
 	if f.selectedPoint < 0 || f.selectedPoint >= len(f.Base) {
 		return
@@ -206,6 +222,7 @@ func (f *Fractal) FlipXPoint() {
 	f.Changed()
 }
 
+// FlipYPoint sets the FlipY bit for selectedPoint.
 func (f *Fractal) FlipYPoint() {
 	if f.selectedPoint < 0 || f.selectedPoint >= len(f.Base) {
 		return
@@ -215,6 +232,7 @@ func (f *Fractal) FlipYPoint() {
 	f.Changed()
 }
 
+// PrunePoint sets the Prune bit for selectedPoint.
 func (f *Fractal) PrunePoint() {
 	if f.selectedPoint < 0 || f.selectedPoint >= len(f.Base) {
 		return
@@ -223,6 +241,7 @@ func (f *Fractal) PrunePoint() {
 	f.SelectPoint(f.selectedPoint)
 }
 
+// HidePoint sets the Hide bit for selectedPoint.
 func (f *Fractal) HidePoint() {
 	if f.selectedPoint < 0 || f.selectedPoint >= len(f.Base) {
 		return
@@ -231,6 +250,7 @@ func (f *Fractal) HidePoint() {
 	f.SelectPoint(f.selectedPoint)
 }
 
+// AddPoint divides the line segment ending in the currently selected point in half.
 func (f *Fractal) AddPoint() {
 	// cap size
 	if len(f.Base) >= 6 || f.selectedPoint < 0 || f.selectedPoint >= len(f.Base) {
@@ -256,6 +276,7 @@ func (f *Fractal) AddPoint() {
 	f.Alloc()
 }
 
+// DelPoint deletes the currently selected point.
 func (f *Fractal) DelPoint() {
 	// cap size
 	if len(f.Base) < 2 || f.selectedPoint < 0 || f.selectedPoint > len(f.Base) {
@@ -273,6 +294,8 @@ func (f *Fractal) DelPoint() {
 	f.Alloc()
 }
 
+// Points returns the points for a given depth. This is trivial except for
+// the hackery to make depth 0 work. It's probably wrong.
 func (f *Fractal) Points(depth int) []Point {
 	if depth > f.Depth || depth < 0 {
 		return nil
@@ -283,6 +306,7 @@ func (f *Fractal) Points(depth int) []Point {
 	return f.lines[depth]
 }
 
+// Render computes the points for a given depth, if the previous line is filled in.
 func (f *Fractal) Render(depth int) bool {
 	var src []Point
 	// the 0-depth case is already filled in, but we need to fix color for it
@@ -317,6 +341,7 @@ func (f *Fractal) Render(depth int) bool {
 	return true
 }
 
+// Partial computes the points interpolated from a single point pair.
 func (f *Fractal) Partial(p0 Point, p1 Point, dest []Point) {
 	flipY := p1.Flags&FlipY != 0
 	flipX := p1.Flags&FlipX != 0
@@ -398,6 +423,7 @@ func rgb(h, s, v uint16) (r, g, b uint16) {
 
 var frac *Fractal
 
+// UIFlag sets the field with a given label to reflect a point's boolean flags. It's wrong.
 func (p *Point) UIFlag(label string, flag int) {
 	e := UIElements[label]
 	if e != nil {
@@ -406,6 +432,7 @@ func (p *Point) UIFlag(label string, flag int) {
 	}
 }
 
+// SelectPoint marks a given point as the current selected point, populating UI fields.
 func (f *Fractal) SelectPoint(index int) {
 	if index >= 0 && index < len(f.Base) {
 		f.selectedPoint = index
@@ -422,11 +449,6 @@ func (f *Fractal) SelectPoint(index int) {
 		UIElements["Hide"].SetColor(grey)
 		UIElements["Prune"].SetColor(grey)
 	}
-}
-
-func dist(x0, y0, x1, y1 float64) float64 {
-	dx, dy := x1-x0, y1-y0
-	return math.Sqrt(dx*dx + dy*dy)
 }
 
 func init() {
@@ -447,6 +469,7 @@ func init() {
 	}
 }
 
+// UIElement describes a UI widget that is probably some kind of button.
 type UIElement struct {
 	bounds    pixel.Rect
 	matrix    pixel.Matrix
@@ -460,6 +483,7 @@ type UIElement struct {
 	enabled   bool
 }
 
+// UIElements is the set of UI elements, and shouldn't be exported.
 var (
 	buttonCanvasSize = 512.0
 	buttonCanvas     *pixelgl.Canvas
@@ -472,11 +496,13 @@ func init() {
 	UIElements = make(map[string]*UIElement)
 }
 
+// SetColor changes the base color of a UI element.
 func (u *UIElement) SetColor(color pixel.RGBA) {
 	u.baseColor = color
 	u.Colorize()
 }
 
+// BoolColor sets a flag field to green (true) or blue (false)
 func (u *UIElement) BoolColor(flag bool) {
 	if flag {
 		u.SetColor(pixel.RGBA{R: 0, G: .7, B: 0, A: 1})
@@ -485,6 +511,8 @@ func (u *UIElement) BoolColor(flag bool) {
 	}
 }
 
+// Colorize sets the actual color based on the dimmed and enabled fields.
+// Probably there should be a backdrop which is affected separately.
 func (u *UIElement) Colorize() {
 	scale := 1.0
 	if u.dimmed {
@@ -496,6 +524,7 @@ func (u *UIElement) Colorize() {
 	u.color = u.baseColor.Scaled(scale)
 }
 
+// SetEnabled sets the Enabled flag. Surprising!
 func (u *UIElement) SetEnabled(state bool) {
 	u.enabled = state
 	if !u.enabled {
@@ -504,21 +533,25 @@ func (u *UIElement) SetEnabled(state bool) {
 	u.Colorize()
 }
 
+// SetDimmed alters a boolean flag. Why did I make this.
 func (u *UIElement) SetDimmed(state bool) {
 	u.dimmed = state
 	u.Colorize()
 }
 
+// Press handles the state transition to Pressed.
 func (u *UIElement) Press() {
 	u.SetDimmed(true)
 	u.state = Pressed
 }
 
+// Unpressed handles the state transition to Unpressed, and does not call a callback.
 func (u *UIElement) Unpressed() {
 	u.SetDimmed(false)
 	u.state = Unpressed
 }
 
+// Release handles the state transition to Unpressed, but *does* call the callback.
 func (u *UIElement) Release() {
 	u.SetDimmed(false)
 	u.state = Unpressed
