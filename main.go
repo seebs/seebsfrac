@@ -75,14 +75,14 @@ func (f *Fractal) Changed() {
 	// first point is the last point's non-position values, and the next-to-last point's
 	// location, with X flipped around 0-1, etcetera, last point is the first point's
 	// values and {1, 0}
-	prev := pixel.Vec{0, 0}
+	prev := pixel.Vec{}
 	f.Inverse = make([]Point, len(f.Base))
-	for i, p := range(f.Base) {
-		p.Vec, prev = pixel.Vec{1 - prev.X, prev.Y}, p.Vec
-		f.Inverse[len(f.Base) - 1 - i] = p
+	for i, p := range f.Base {
+		p.Vec, prev = pixel.Vec{X: 1 - prev.X, Y: prev.Y}, p.Vec
+		f.Inverse[len(f.Base)-1-i] = p
 	}
 	f.Depth = 0
-	f.Bounds = pixel.Rect { Min: pixel.Vec{}, Max: pixel.Vec{1, 0} }
+	f.Bounds = pixel.Rect{Min: pixel.Vec{}, Max: pixel.Vec{X: 1}}
 	f.Render(0)
 	f.Render(1)
 	f.Render(2)
@@ -318,8 +318,8 @@ func (f *Fractal) Render(depth int) bool {
 }
 
 func (f *Fractal) Partial(p0 Point, p1 Point, dest []Point) {
-	flipY := p1.Flags & FlipY != 0
-	flipX := p1.Flags & FlipX != 0
+	flipY := p1.Flags&FlipY != 0
+	flipX := p1.Flags&FlipX != 0
 	a := NewAffineBetween(p0, p1)
 	var base []Point
 	if flipX {
@@ -401,12 +401,12 @@ var frac *Fractal
 func (p *Point) UIFlag(label string, flag int) {
 	e := UIElements[label]
 	if e != nil {
-		e.BoolColor(p.Flags & flag != 0)
+		e.BoolColor(p.Flags&flag != 0)
 		e.SetEnabled(true)
 	}
 }
 
-func (f *Fractal)SelectPoint(index int) {
+func (f *Fractal) SelectPoint(index int) {
 	if index >= 0 && index < len(f.Base) {
 		f.selectedPoint = index
 		p := f.Base[index]
@@ -416,7 +416,7 @@ func (f *Fractal)SelectPoint(index int) {
 		p.UIFlag("Prune", Prune)
 	} else {
 		f.selectedPoint = -1
-		grey := pixel.RGBA { 0.5, 0.5, 0.5, 1.0 }
+		grey := pixel.RGBA{R: 0.5, G: 0.5, B: 0.5, A: 1.0}
 		UIElements["FlipX"].SetColor(grey)
 		UIElements["FlipY"].SetColor(grey)
 		UIElements["Hide"].SetColor(grey)
@@ -463,7 +463,7 @@ type UIElement struct {
 var (
 	buttonCanvasSize = 512.0
 	buttonCanvas     *pixelgl.Canvas
-	buttonDot	 pixel.Vec
+	buttonDot        pixel.Vec
 	UIElements       map[string]*UIElement
 	uiBatch          *pixel.Batch
 )
@@ -479,19 +479,19 @@ func (u *UIElement) SetColor(color pixel.RGBA) {
 
 func (u *UIElement) BoolColor(flag bool) {
 	if flag {
-		u.SetColor(pixel.RGBA{0, .7, 0, 1})
+		u.SetColor(pixel.RGBA{R: 0, G: .7, B: 0, A: 1})
 	} else {
-		u.SetColor(pixel.RGBA{0, 0, 1, 1})
+		u.SetColor(pixel.RGBA{R: 0, G: 0, B: 1, A: 1})
 	}
 }
 
 func (u *UIElement) Colorize() {
 	scale := 1.0
 	if u.dimmed {
-		scale *= 0.7;
+		scale *= 0.7
 	}
 	if !u.enabled {
-		scale *= 0.5;
+		scale *= 0.5
 	}
 	u.color = u.baseColor.Scaled(scale)
 }
@@ -528,18 +528,18 @@ func (u *UIElement) Release() {
 func button(at pixel.Vec, name string, callback func(), format string, args ...interface{}) {
 	descent := atlas.Descent()
 	if buttonCanvas == nil {
-		buttonCanvas = pixelgl.NewCanvas(pixel.Rect { Min: pixel.Vec { 0, 0 }, Max: pixel.Vec { buttonCanvasSize, buttonCanvasSize } })
+		buttonCanvas = pixelgl.NewCanvas(pixel.Rect{Min: pixel.Vec{}, Max: pixel.Vec{X: buttonCanvasSize, Y: buttonCanvasSize}})
 		// buttonCanvas.Clear(pixel.RGBA{0, .2, 0, 1})
 		uiBatch = pixel.NewBatch(&pixel.TrianglesData{}, buttonCanvas)
 		buttonDot.Y = descent
 	}
 	textRenderer.Clear()
-	textRenderer.Color = pixel.RGBA{1, 1, 1, 1}
-	textRenderer.Orig = pixel.Vec{0, descent}
+	textRenderer.Color = pixel.RGBA{R: 1, G: 1, B: 1, A: 1}
+	textRenderer.Orig = pixel.Vec{X: 0, Y: descent}
 	textRenderer.Dot = textRenderer.Orig
 	label := fmt.Sprintf(format, args...)
 	textSize := textRenderer.BoundsOf(label)
-	if textSize.Max.X + buttonDot.X > buttonCanvasSize {
+	if textSize.Max.X+buttonDot.X > buttonCanvasSize {
 		buttonDot.Y += textSize.Max.Y + descent + 2
 		buttonDot.X = 0
 	}
@@ -553,14 +553,14 @@ func button(at pixel.Vec, name string, callback func(), format string, args ...i
 	// draw instruction will center on point, rather than originating at point
 	center := at.Add(spriteBounds.Size().Scaled(0.5))
 	UIElements[name] = &UIElement{
-		enabled: true,
-		color: pixel.RGBA{1, 1, 1, 1},
-		baseColor: pixel.RGBA{1, 1, 1, 1},
-		bounds: pixel.Rect{Min: at, Max: spriteBounds.Size().Add(at) },
-		callback: callback,
-		sprite: sprite,
-		matrix: pixel.IM.Moved(center),
-		label: label,
+		enabled:   true,
+		color:     pixel.RGBA{R: 1, G: 1, B: 1, A: 1},
+		baseColor: pixel.RGBA{R: 1, G: 1, B: 1, A: 1},
+		bounds:    pixel.Rect{Min: at, Max: spriteBounds.Size().Add(at)},
+		callback:  callback,
+		sprite:    sprite,
+		matrix:    pixel.IM.Moved(center),
+		label:     label,
 	}
 }
 
@@ -584,18 +584,18 @@ func run() {
 	var err error
 
 	var (
-		frames         int
-		lastFPS        int
-		totalFrames    int
-		averageFPS     float64
-		totalSeconds   int
-		dragging       bool
-		dragStart      pixel.Vec
-		dragPoint      pixel.Vec
-		lastDrag       pixel.Vec
-		winScale     = pixel.Vec { X: 1000, Y: 800 }
+		frames       int
+		lastFPS      int
+		totalFrames  int
+		averageFPS   float64
+		totalSeconds int
+		dragging     bool
+		dragStart    pixel.Vec
+		dragPoint    pixel.Vec
+		lastDrag     pixel.Vec
+		winScale     = pixel.Vec{X: 1000, Y: 800}
 		canScale     = 2.0
-		margin	     = 5.0
+		margin       = 5.0
 	)
 
 	f, err := os.Create("pdata")
@@ -605,12 +605,12 @@ func run() {
 	pprof.StartCPUProfile(f)
 	defer pprof.StopCPUProfile()
 
-	fracPortRect := pixel.Rect{Min: pixel.Vec{margin, margin}, Max: winScale.Scaled(canScale).Sub(pixel.Vec{margin, margin})}
+	fracPortRect := pixel.Rect{Min: pixel.Vec{X: margin, Y: margin}, Max: winScale.Scaled(canScale).Sub(pixel.Vec{X: margin, Y: margin})}
 	fracPortScale := int32(0)
 	base := []Point{
-		Point{pixel.Vec{0.05, 0.25}, 0, 0, 255, 255},
-		Point{pixel.Vec{0.95, -0.25}, 0, 0, 255, 255},
-		Point{pixel.Vec{1, 0}, 0, 0, 255, 255},
+		Point{pixel.Vec{X: 0.05, Y: 0.25}, 0, 0, 255, 255},
+		Point{pixel.Vec{X: 0.95, Y: -0.25}, 0, 0, 255, 255},
+		Point{pixel.Vec{X: 1, Y: 0}, 0, 0, 255, 255},
 	}
 	frac = NewFractal(base, 18)
 	frac.H = 330
@@ -633,26 +633,26 @@ func run() {
 	}
 	win.SetSmooth(true)
 
-	can := pixelgl.NewCanvas(pixel.Rect{pixel.Vec{0, 0}, pixel.Vec{2000, 1600}})
+	can := pixelgl.NewCanvas(pixel.Rect{Min: pixel.Vec{}, Max: pixel.Vec{X: 2000, Y: 1600}})
 	win.SetComposeMethod(pixel.ComposePlus)
-	canMatrix := pixel.IM.Scaled(pixel.Vec{0, 0}, 0.5).Moved(pixel.Vec{700, 400})
+	canMatrix := pixel.IM.Scaled(pixel.Vec{}, 0.5).Moved(pixel.Vec{X: 700, Y: 400})
 
 	imd := imdraw.New(nil)
 	imd.SetMatrix(fracMatrix)
 
 	second := time.Tick(time.Second)
 
-	button(pixel.Vec{30, 50}, "DelPoint", func() { frac.DelPoint() }, "-")
-	button(pixel.Vec{50, 50}, "AddPoint", func() { frac.AddPoint() }, "+")
-	button(pixel.Vec{10, 70}, "FlipX", func() { frac.FlipXPoint() }, "FlipX")
-	button(pixel.Vec{80, 70}, "FlipY", func() { frac.FlipYPoint() }, "FlipY")
-	button(pixel.Vec{10, 90}, "Hide", func() { frac.HidePoint() }, "Hide")
-	button(pixel.Vec{80, 90}, "Prune", func() { frac.PrunePoint() }, "Prune")
+	button(pixel.Vec{X: 30, Y: 650}, "DelPoint", func() { frac.DelPoint() }, "Add")
+	button(pixel.Vec{X: 50, Y: 650}, "AddPoint", func() { frac.AddPoint() }, "Del")
+	button(pixel.Vec{X: 10, Y: 70}, "FlipX", func() { frac.FlipXPoint() }, "FlipX")
+	button(pixel.Vec{X: 80, Y: 70}, "FlipY", func() { frac.FlipYPoint() }, "FlipY")
+	button(pixel.Vec{X: 10, Y: 90}, "Hide", func() { frac.HidePoint() }, "Hide")
+	button(pixel.Vec{X: 80, Y: 90}, "Prune", func() { frac.PrunePoint() }, "Prune")
 
 	for !win.Closed() {
 		scrolled := win.MouseScroll()
 		mousePos := win.MousePosition()
-		canPos := canMatrix.Unproject(mousePos).Add(pixel.Vec{1000, 800})
+		canPos := canMatrix.Unproject(mousePos).Add(pixel.Vec{X: 1000, Y: 800})
 		if scrolled.Y != 0 {
 			fracPortScale += int32(scrolled.Y)
 			if !dragging {
@@ -670,13 +670,13 @@ func run() {
 					break
 				}
 			}
-			
+
 			if !found && canPos.X >= 0 {
 				// find click within the canvas space
 				leastDist := 999999.0
 				pidx := -1
 				for i, p := range frac.Base {
-					pv := fracMatrix.Project(pixel.Vec{p.X, p.Y})
+					pv := fracMatrix.Project(pixel.Vec{X: p.X, Y: p.Y})
 					dist := math.Hypot(pv.X-canPos.X, pv.Y-canPos.Y)
 					if dist < 30 && dist < leastDist {
 						leastDist = dist
@@ -727,13 +727,13 @@ func run() {
 			imd.SetMatrix(fracMatrix)
 		}
 		win.SetComposeMethod(pixel.ComposeOver)
-		win.Clear(pixel.RGBA{0, 0, 0, 255})
-		textAt(win, pixel.Vec{0, 0}, pixel.RGBA{1, 1, 1, 1},
-			"Depth: %d/%d", frac.Depth, frac.MaxDepth - 1)
-		textAt(win, pixel.Vec{0, 1}, pixel.RGBA{1, 1, 1, 1},
-			"Points: %d", frac.Total)
-		textAt(win, pixel.Vec{0, 2}, pixel.RGBA{1, 1, 1, 1},
+		win.Clear(pixel.RGBA{R: 0, G: 0, B: 0, A: 255})
+		textAt(win, pixel.Vec{X: 0, Y: 0}, pixel.RGBA{R: 1, G: 1, B: 1, A: 1},
 			"Scale: %d", fracPortScale)
+		textAt(win, pixel.Vec{X: 0, Y: 1}, pixel.RGBA{R: 1, G: 1, B: 1, A: 1},
+			"Depth: %d/%d", frac.Depth, frac.MaxDepth-1)
+		textAt(win, pixel.Vec{X: 0, Y: 2}, pixel.RGBA{R: 1, G: 1, B: 1, A: 1},
+			"Points: %d", frac.Total)
 		uiBatch.Clear()
 		for _, e := range UIElements {
 			e.sprite.DrawColorMask(uiBatch, e.matrix, e.color)
@@ -741,46 +741,46 @@ func run() {
 		uiBatch.Draw(win)
 		if frac.selectedPoint >= 0 {
 			p := frac.Base[frac.selectedPoint]
-			textAt(win, pixel.Vec{0, 4}, pixel.RGBA{.7, .7, .7, 1},
-				"Point: %d", frac.selectedPoint + 1)
-			textAt(win, pixel.Vec{0, 5}, pixel.RGBA{.7, .7, .7, 1},
+			textAt(win, pixel.Vec{X: 0, Y: 4}, pixel.RGBA{R: .7, G: .7, B: .7, A: 1},
+				"Point: %d", frac.selectedPoint+1)
+			textAt(win, pixel.Vec{X: 0, Y: 5}, pixel.RGBA{R: .7, G: .7, B: .7, A: 1},
 				"X: %-+6.3f Y: %-+6.3f", p.X, p.Y)
 		}
-		textAt(win, pixel.Vec{0, 30}, pixel.RGBA{1, 1, 1, 1},
+		textAt(win, pixel.Vec{X: 0, Y: 30}, pixel.RGBA{R: 1, G: 1, B: 1, A: 1},
 			"FPS: %d\n[%.1f avg %ds]", lastFPS, averageFPS, totalSeconds)
-		can.Clear(pixel.RGBA{0, 0, 0, 255})
+		can.Clear(pixel.RGBA{R: 0, G: 0, B: 0, A: 255})
 		can.Draw(win, canMatrix)
 		win.SetComposeMethod(pixel.ComposePlus)
 		for i := 1; i <= frac.Depth; i++ {
 			imd.Clear()
 			points := frac.Points(i)
 			r, g, b := rgb(points[0].H, points[0].S, points[0].V)
-			imd.Color = pixel.RGBA{float64(r) / 255, float64(g) / 255, float64(b) / 255, 1}
+			imd.Color = pixel.RGBA{R: float64(r) / 255, G: float64(g) / 255, B: float64(b) / 255, A: 1}
 			imd.Push(pixel.Vec{})
 			for j := 0; j < len(points); j++ {
 				p := points[j]
-				imd.Push(pixel.Vec{p.X, p.Y})
+				imd.Push(pixel.Vec{X: p.X, Y: p.Y})
 			}
 			imd.Line(2 / fracMatrix[0])
 			imd.Draw(can)
 			can.Draw(win, canMatrix)
-			can.Clear(pixel.RGBA{0, 0, 0, 255})
+			can.Clear(pixel.RGBA{R: 0, G: 0, B: 0, A: 255})
 		}
 		if frac.selectedPoint >= 0 {
 			p := frac.Base[frac.selectedPoint]
 			imd.Clear()
 			r, g, b := rgb(p.H, p.S, p.V)
-			imd.Color = pixel.RGBA{float64(r) / 255, float64(g) / 255, float64(b) / 255, 1}
+			imd.Color = pixel.RGBA{R: float64(r) / 255, G: float64(g) / 255, B: float64(b) / 255, A: 1}
 			if frac.selectedPoint > 0 {
-				imd.Push(pixel.Vec{frac.Base[frac.selectedPoint-1].X, frac.Base[frac.selectedPoint-1].Y})
+				imd.Push(pixel.Vec{X: frac.Base[frac.selectedPoint-1].X, Y: frac.Base[frac.selectedPoint-1].Y})
 			} else {
 				imd.Push(pixel.Vec{})
 			}
-			imd.Push(pixel.Vec{p.X, p.Y})
+			imd.Push(pixel.Vec{X: p.X, Y: p.Y})
 			imd.Line(6 / fracMatrix[0])
 			imd.Draw(can)
 			can.Draw(win, canMatrix)
-			can.Clear(pixel.RGBA{0, 0, 0, 255})
+			can.Clear(pixel.RGBA{R: 0, G: 0, B: 0, A: 255})
 		}
 		win.Update()
 		frames++
