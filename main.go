@@ -675,8 +675,8 @@ func run() {
 
 	second := time.Tick(time.Second)
 
-	button(pixel.Vec{X: 30, Y: 650}, "DelPoint", func() { frac.DelPoint() }, "Add")
-	button(pixel.Vec{X: 50, Y: 650}, "AddPoint", func() { frac.AddPoint() }, "Del")
+	button(pixel.Vec{X: 10, Y: 650}, "AddPoint", func() { frac.AddPoint() }, "Del")
+	button(pixel.Vec{X: 60, Y: 650}, "DelPoint", func() { frac.DelPoint() }, "Add")
 	button(pixel.Vec{X: 10, Y: 70}, "FlipX", func() { frac.FlipXPoint() }, "FlipX")
 	button(pixel.Vec{X: 80, Y: 70}, "FlipY", func() { frac.FlipYPoint() }, "FlipY")
 	button(pixel.Vec{X: 10, Y: 90}, "Hide", func() { frac.HidePoint() }, "Hide")
