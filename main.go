@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -61,18 +62,23 @@ func (p Point) String() string {
 // Fractal represents both the underlying data and the current rendered state,
 // which in retrospect is a bad decision.
 type Fractal struct {
-	dataSize      int
-	MaxDepth      int
-	Depth         int
+	MaxDepth   int
+	Base       []Point
+	H, S, V    uint16     // 0-360, 0-255, 0-255
+	RenderData `json:"-"` // don't try to log all this junk
+}
+
+// RenderData is the rendered/computed data for the fractal.
+type RenderData struct {
 	MaxOOM        uint
 	Total         int
-	Base          []Point
+	selectedPoint int
 	Inverse       []Point
+	Depth         int
+	dataSize      int
 	data          []Point
 	lines         [][]Point
 	Bounds        pixel.Rect
-	H, S, V       uint16 // 0-360, 0-255, 0-255
-	selectedPoint int
 }
 
 // Changed causes re-rendering of a fractal.
@@ -209,6 +215,10 @@ func NewFractal(base []Point, maxOOM uint) *Fractal {
 	// this will be capped by MaxOOM
 	f.Depth = 1
 	f.Alloc()
+	jsonstr, err := json.Marshal(*f)
+	if err == nil {
+		fmt.Printf("json: %s\n", jsonstr)
+	}
 	return f
 }
 
