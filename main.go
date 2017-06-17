@@ -658,8 +658,8 @@ func run() {
 	fracPortRect := pixel.Rect{Min: pixel.Vec{X: margin, Y: margin}, Max: winScale.Scaled(canScale).Sub(pixel.Vec{X: margin, Y: margin})}
 	fracPortScale := int32(0)
 	base := []Point{
-		Point{pixel.Vec{X: 0.05, Y: 0.25}, FixedS | FixedV, 10, 255, 255},
-		Point{pixel.Vec{X: 0.95, Y: -0.25}, FixedS | FixedV, 20, 255, 255},
+		Point{pixel.Vec{X: 0.05, Y: 0.25}, FixedS | FixedV, 30, 255, 255},
+		Point{pixel.Vec{X: 0.95, Y: -0.25}, FixedS | FixedV, 30, 255, 255},
 		Point{pixel.Vec{X: 1, Y: 0}, FixedS | FixedV, 30, 255, 255},
 	}
 	frac = NewFractal(base, 18)
@@ -810,11 +810,11 @@ func run() {
 			r, g, b := rgb(points[0].H, points[0].S, points[0].V)
 			imd.Color = pixel.RGBA{R: float64(r) / 255, G: float64(g) / 255, B: float64(b) / 255, A: 1}
 			imd.Push(pixel.Vec{})
-			for j := 0; j < len(points); j++ {
+			imd.Push(points[0].Vec)
+			for j := 1; j < len(points); j++ {
 				r, g, b := rgb(points[j].H, points[j].S, points[j].V)
 				imd.Color = pixel.RGBA{R: float64(r) / 255, G: float64(g) / 255, B: float64(b) / 255, A: 1}
-				p := points[j]
-				imd.Push(pixel.Vec{X: p.X, Y: p.Y})
+				imd.Push(points[j].Vec)
 			}
 			imd.Line(2 / fracMatrix[0])
 			imd.Draw(can)
