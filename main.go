@@ -52,7 +52,7 @@ var (
 type Point struct {
 	pixel.Vec
 	Flags   int
-	H, S, V uint16 // 0-360, 0-255, 0-255
+	H, S, V int16 // 0-360, 0-255, 0-255
 }
 
 func (p Point) String() string {
@@ -64,7 +64,6 @@ func (p Point) String() string {
 type Fractal struct {
 	MaxDepth   int
 	Base       []Point
-	H, S, V    uint16     // 0-360, 0-255, 0-255
 	RenderData `json:"-"` // don't try to log all this junk
 }
 
@@ -222,42 +221,14 @@ func NewFractal(base []Point, maxOOM uint) *Fractal {
 	return f
 }
 
-// FlipXPoint sets the FlipX bit for selectedPoint.
-func (f *Fractal) FlipXPoint() {
+// Toggle toggles the selected flag bit
+func (f *Fractal) Toggle(flag int) {
 	if f.selectedPoint < 0 || f.selectedPoint >= len(f.Base) {
 		return
 	}
-	f.Base[f.selectedPoint].Flags ^= FlipX
+	f.Base[f.selectedPoint].Flags ^= flag
 	f.SelectPoint(f.selectedPoint)
 	f.Changed()
-}
-
-// FlipYPoint sets the FlipY bit for selectedPoint.
-func (f *Fractal) FlipYPoint() {
-	if f.selectedPoint < 0 || f.selectedPoint >= len(f.Base) {
-		return
-	}
-	f.Base[f.selectedPoint].Flags ^= FlipY
-	f.SelectPoint(f.selectedPoint)
-	f.Changed()
-}
-
-// PrunePoint sets the Prune bit for selectedPoint.
-func (f *Fractal) PrunePoint() {
-	if f.selectedPoint < 0 || f.selectedPoint >= len(f.Base) {
-		return
-	}
-	f.Base[f.selectedPoint].Flags ^= Prune
-	f.SelectPoint(f.selectedPoint)
-}
-
-// HidePoint sets the Hide bit for selectedPoint.
-func (f *Fractal) HidePoint() {
-	if f.selectedPoint < 0 || f.selectedPoint >= len(f.Base) {
-		return
-	}
-	f.Base[f.selectedPoint].Flags ^= Hide
-	f.SelectPoint(f.selectedPoint)
 }
 
 // AddPoint divides the line segment ending in the currently selected point in half.
@@ -368,11 +339,18 @@ func (f *Fractal) Partial(p0 Point, p1 Point, dest []Point) {
 		if flipY {
 			p.Y *= -1
 		}
+		dest[i] = p
 		dest[i].Vec = a.Project(p.Vec)
-		dest[i].H = (p.H + p1.H + (f.H / uint16(f.MaxDepth))) % 360
-		dest[i].S = p.S
-		dest[i].V = p.V
-		dest[i].Flags = p.Flags ^ (p1.Flags & (FlipX | FlipY))
+		if p.Flags&FixedH == 0 {
+			dest[i].H = modPlus(p.H+p1.H, 360)
+		}
+		if p.Flags&FixedS == 0 {
+			dest[i].S = satMod(p.S+p1.S, 256)
+		}
+		if p.Flags&FixedV == 0 {
+			dest[i].V = satMod(p.V+p1.V, 256)
+		}
+		dest[i].Flags ^= (p1.Flags & (FlipX | FlipY))
 		// fmt.Printf("... point %d: %v\n", i, dest[i])
 	}
 }
@@ -402,12 +380,34 @@ func loadTTF(path string, size float64) (font.Face, error) {
 
 var runningMutex sync.Mutex
 
+// modPlus yields the positive remainder of x/y
+func modPlus(x, y int16) int16 {
+	x = x % y
+	if x < 0 {
+		return x + y
+	}
+	return x
+}
+
+// satMod(x,y) yields y-1 for x >= y, otherwise the positive remainder of x/y
+func satMod(x, y int16) int16 {
+	if x >= y {
+		return y - 1
+	}
+	if x < 0 {
+		return x%y + y
+	}
+	return x
+}
+
 // r, g, b = rgb(frac[i].h, frac[i].s, frac[i].v)
-func rgb(h, s, v uint16) (r, g, b uint16) {
-	h = (h + 720) % 360
+func rgb(h, s, v int16) (r, g, b int16) {
+	h = modPlus(h, 360)
 	q := h / 60
 	hp := h % 60
-	c := s * v / 255
+	s = satMod(s, 256)
+	v = satMod(v, 256)
+	c := int16(int(s) * int(v) / 255)
 	m := v - c
 	x := c * hp / 60
 	if (q & 1) != 0 {
@@ -451,6 +451,9 @@ func (f *Fractal) SelectPoint(index int) {
 		p.UIFlag("FlipY", FlipY)
 		p.UIFlag("Hide", Hide)
 		p.UIFlag("Prune", Prune)
+		p.UIFlag("FixH", FixedH)
+		p.UIFlag("FixS", FixedS)
+		p.UIFlag("FixV", FixedV)
 	} else {
 		f.selectedPoint = -1
 		grey := pixel.RGBA{R: 0.5, G: 0.5, B: 0.5, A: 1.0}
@@ -458,6 +461,10 @@ func (f *Fractal) SelectPoint(index int) {
 		UIElements["FlipY"].SetColor(grey)
 		UIElements["Hide"].SetColor(grey)
 		UIElements["Prune"].SetColor(grey)
+		UIElements["FixH"].SetColor(grey)
+		UIElements["FixS"].SetColor(grey)
+		UIElements["FixV"].SetColor(grey)
+
 	}
 }
 
@@ -651,12 +658,11 @@ func run() {
 	fracPortRect := pixel.Rect{Min: pixel.Vec{X: margin, Y: margin}, Max: winScale.Scaled(canScale).Sub(pixel.Vec{X: margin, Y: margin})}
 	fracPortScale := int32(0)
 	base := []Point{
-		Point{pixel.Vec{X: 0.05, Y: 0.25}, 0, 0, 255, 255},
-		Point{pixel.Vec{X: 0.95, Y: -0.25}, 0, 0, 255, 255},
-		Point{pixel.Vec{X: 1, Y: 0}, 0, 0, 255, 255},
+		Point{pixel.Vec{X: 0.05, Y: 0.25}, FixedS | FixedV, 10, 255, 255},
+		Point{pixel.Vec{X: 0.95, Y: -0.25}, FixedS | FixedV, 20, 255, 255},
+		Point{pixel.Vec{X: 1, Y: 0}, FixedS | FixedV, 30, 255, 255},
 	}
 	frac = NewFractal(base, 18)
-	frac.H = 330
 	for i := 0; i < frac.MaxDepth; i++ {
 		if !frac.Render(i) {
 			fmt.Printf("oops, render %d failed.\n", i)
@@ -687,10 +693,14 @@ func run() {
 
 	button(pixel.Vec{X: 10, Y: 650}, "AddPoint", func() { frac.AddPoint() }, "Del")
 	button(pixel.Vec{X: 60, Y: 650}, "DelPoint", func() { frac.DelPoint() }, "Add")
-	button(pixel.Vec{X: 10, Y: 70}, "FlipX", func() { frac.FlipXPoint() }, "FlipX")
-	button(pixel.Vec{X: 80, Y: 70}, "FlipY", func() { frac.FlipYPoint() }, "FlipY")
-	button(pixel.Vec{X: 10, Y: 90}, "Hide", func() { frac.HidePoint() }, "Hide")
-	button(pixel.Vec{X: 80, Y: 90}, "Prune", func() { frac.PrunePoint() }, "Prune")
+	button(pixel.Vec{X: 10, Y: 70}, "FlipX", func() { frac.Toggle(FlipX) }, "FlipX")
+	button(pixel.Vec{X: 80, Y: 70}, "FlipY", func() { frac.Toggle(FlipY) }, "FlipY")
+	button(pixel.Vec{X: 10, Y: 90}, "Hide", func() { frac.Toggle(Hide) }, "Hide")
+	button(pixel.Vec{X: 80, Y: 90}, "Prune", func() { frac.Toggle(Prune) }, "Prune")
+	button(pixel.Vec{X: 10, Y: 50}, "FixH", func() { frac.Toggle(FixedH) }, "FixH")
+	button(pixel.Vec{X: 80, Y: 50}, "FixS", func() { frac.Toggle(FixedS) }, "FixS")
+	button(pixel.Vec{X: 10, Y: 30}, "FixV", func() { frac.Toggle(FixedV) }, "FixV")
+	frac.SelectPoint(-1)
 
 	for !win.Closed() {
 		scrolled := win.MouseScroll()
@@ -801,6 +811,8 @@ func run() {
 			imd.Color = pixel.RGBA{R: float64(r) / 255, G: float64(g) / 255, B: float64(b) / 255, A: 1}
 			imd.Push(pixel.Vec{})
 			for j := 0; j < len(points); j++ {
+				r, g, b := rgb(points[j].H, points[j].S, points[j].V)
+				imd.Color = pixel.RGBA{R: float64(r) / 255, G: float64(g) / 255, B: float64(b) / 255, A: 1}
 				p := points[j]
 				imd.Push(pixel.Vec{X: p.X, Y: p.Y})
 			}
@@ -810,16 +822,17 @@ func run() {
 			can.Clear(pixel.RGBA{R: 0, G: 0, B: 0, A: 255})
 		}
 		if frac.selectedPoint >= 0 {
-			p := frac.Base[frac.selectedPoint]
+			line := frac.Points(1)
+			p := line[frac.selectedPoint]
 			imd.Clear()
 			r, g, b := rgb(p.H, p.S, p.V)
 			imd.Color = pixel.RGBA{R: float64(r) / 255, G: float64(g) / 255, B: float64(b) / 255, A: 1}
 			if frac.selectedPoint > 0 {
-				imd.Push(pixel.Vec{X: frac.Base[frac.selectedPoint-1].X, Y: frac.Base[frac.selectedPoint-1].Y})
+				imd.Push(line[frac.selectedPoint-1].Vec)
 			} else {
 				imd.Push(pixel.Vec{})
 			}
-			imd.Push(pixel.Vec{X: p.X, Y: p.Y})
+			imd.Push(p.Vec)
 			imd.Line(6 / fracMatrix[0])
 			imd.Draw(can)
 			can.Draw(win, canMatrix)
