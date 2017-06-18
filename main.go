@@ -79,6 +79,7 @@ type RenderData struct {
 	lines         [][]Point
 	Bounds        pixel.Rect
 	colorTab      []pixel.RGBA
+	verbose       bool
 }
 
 // Changed causes re-rendering of a fractal.
@@ -181,13 +182,36 @@ func (f *Fractal) Alloc() {
 	f.MaxDepth = 20
 	totals := make([]int, f.MaxDepth)
 	total := 0
-	size := 1
+	npsize := 1 // total set of non-pruned points in current line
+	psize := 0  // total set of pruned points in current line
+	// for each non-pruned point, we need N points. For each
+	// pruned point, we need one.
+	baseLen := len(f.Base)
+	prunes := 0
+	nprunes := baseLen
+	for i := range f.Base {
+		if f.Base[i].Flags&Prune != 0 {
+			prunes++
+			nprunes--
+		}
+	}
+	fmt.Printf("Base len %d: %d pruned, %d non-pruned.", baseLen, prunes, nprunes)
+	// We start with one non-pruned line, which will produce
+	// one pruned point for each pruned point in base, and one
+	// non-pruned point for each non-pruned point in base.
+	//
+	// After this, we keep all the pruned points, and every
+	// non-pruned point produces one pruned point for each pruned point
+	// in base, and one non-pruned point for each non-pruned point in base.
 	for i := 0; i < f.MaxDepth; i++ {
-		total += size
+		total += npsize + psize
+		fmt.Printf("Depth %d: %d+%d points.", i, npsize, psize)
+		psize += (npsize * prunes)
+		npsize *= nprunes
+		fmt.Printf(" Expecting %d+%d for next line.\n", npsize, psize)
 		totals[i] = total
-		size *= len(f.Base)
 		// cap maxdepth
-		if total+size > (1 << f.MaxOOM) {
+		if total+psize+npsize > (1 << f.MaxOOM) {
 			f.MaxDepth = i + 1
 		}
 	}
@@ -200,7 +224,9 @@ func (f *Fractal) Alloc() {
 		f.lines[i] = f.data[prev:totals[i]]
 		prev = totals[i]
 	}
+	f.verbose = true
 	f.Changed()
+	f.verbose = false
 }
 
 // NewFractal allocates a fractal.
@@ -241,7 +267,11 @@ func (f *Fractal) Toggle(flag int) {
 	}
 	f.Base[f.selectedPoint].Flags ^= flag
 	f.SelectPoint(f.selectedPoint)
-	f.Changed()
+	if flag == Prune {
+		f.Alloc()
+	} else {
+		f.Changed()
+	}
 }
 
 // ColorChange adds an amount to the color trait of the point.
@@ -366,11 +396,23 @@ func (f *Fractal) Render(depth int) bool {
 	// fmt.Printf("render depth %d (src %d, dest %d points)\n", depth, len(src), cap(dest))
 
 	prev := Point{}
-	for p := range src {
+	pruned := 0
+	npruned := 0
+	for i := range src {
 		// fmt.Printf("rendering partial %d [%d:%d]\n", p, offset, offset + l)
-		f.Partial(prev, src[p], dest[offset:offset+l])
-		prev = src[p]
-		offset += l
+		if src[i].Flags&Prune == 0 {
+			p, np := f.Partial(prev, src[i], dest[offset:offset+l])
+			pruned, npruned = pruned+p, npruned+np
+			offset += l
+		} else {
+			dest[offset] = src[i]
+			pruned++
+			offset++
+		}
+		prev = src[i]
+	}
+	if f.verbose {
+		fmt.Printf("Depth %d: Actually generated %d non-pruned, %d pruned.\n", depth, npruned, pruned)
 	}
 	nb := f.BoundsAt(depth)
 	f.Bounds = f.Bounds.Union(nb)
@@ -382,7 +424,7 @@ func (f *Fractal) Render(depth int) bool {
 }
 
 // Partial computes the points interpolated from a single point pair.
-func (f *Fractal) Partial(p0 Point, p1 Point, dest []Point) {
+func (f *Fractal) Partial(p0 Point, p1 Point, dest []Point) (int, int) {
 	flipY := p1.Flags&FlipY != 0
 	flipX := p1.Flags&FlipX != 0
 	a := NewAffineBetween(p0, p1)
@@ -392,6 +434,8 @@ func (f *Fractal) Partial(p0 Point, p1 Point, dest []Point) {
 	} else {
 		base = f.Base
 	}
+	pruned := 0
+	npruned := 0
 
 	for i := 0; i < len(base); i++ {
 		p := base[i]
@@ -399,6 +443,11 @@ func (f *Fractal) Partial(p0 Point, p1 Point, dest []Point) {
 			p.Y *= -1
 		}
 		dest[i] = p
+		if p.Flags&Prune != 0 {
+			npruned++
+		} else {
+			pruned++
+		}
 		dest[i].Vec = a.Project(p.Vec)
 		if p.Flags&FixedC == 0 {
 			dest[i].Color += p1.Color
@@ -407,6 +456,7 @@ func (f *Fractal) Partial(p0 Point, p1 Point, dest []Point) {
 		dest[i].Flags ^= (p1.Flags & (FlipX | FlipY))
 		// fmt.Printf("... point %d: %v\n", i, dest[i])
 	}
+	return npruned, pruned
 }
 
 func loadTTF(path string, size float64) (font.Face, error) {
@@ -931,16 +981,29 @@ func run() {
 		for i := 1; i <= frac.Depth; i++ {
 			imd.Clear()
 			points := frac.Points(i)
-			last := len(points) - 1
-			imd.Color = frac.colorTab[points[last].Color]
-			imd.Push(pixel.Vec{})
-			imd.Color = frac.colorTab[points[0].Color]
-			imd.Push(points[0].Vec)
-			for j := 1; j < len(points); j++ {
+			prev := &Point{Vec: pixel.Vec{}, Color: points[len(points)-1].Color}
+			drawing := false
+			for j := 0; j < len(points); j++ {
+				if points[j].Flags&Hide != 0 {
+					if drawing {
+						imd.Line(2 / fracMatrix[0])
+						drawing = false
+					}
+					prev = &points[j]
+					continue
+				}
+				if prev != nil {
+					imd.Color = frac.colorTab[prev.Color]
+					imd.Push(prev.Vec)
+					prev = nil
+				}
 				imd.Color = frac.colorTab[points[j].Color]
 				imd.Push(points[j].Vec)
+				drawing = true
 			}
-			imd.Line(2 / fracMatrix[0])
+			if drawing {
+				imd.Line(2 / fracMatrix[0])
+			}
 			imd.Draw(can)
 			can.Draw(win, canMatrix)
 			can.Clear(pixel.RGBA{R: 0, G: 0, B: 0, A: 255})
