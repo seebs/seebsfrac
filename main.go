@@ -253,7 +253,7 @@ func (f *Fractal) ColorChange(amt int) {
 	f.Changed()
 }
 
-// XChange adds an amount to the innate color trait of the point.
+// XChange adds an amount to the X location of the point.
 func (f *Fractal) XChange(amt float64) {
 	if f.selectedPoint < 0 || f.selectedPoint >= len(f.Base) {
 		return
@@ -263,7 +263,7 @@ func (f *Fractal) XChange(amt float64) {
 	f.Changed()
 }
 
-// XChange adds an amount to the innate color trait of the point.
+// YChange adds an amount to the Y location of the point.
 func (f *Fractal) YChange(amt float64) {
 	if f.selectedPoint < 0 || f.selectedPoint >= len(f.Base) {
 		return
