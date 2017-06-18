@@ -26,9 +26,7 @@ const (
 	Prune
 	FlipX
 	FlipY
-	FixedH
-	FixedS
-	FixedV
+	FixedC
 )
 
 // Mouse activity states. A button starts out Unpressed, then is Pressed,
@@ -51,12 +49,12 @@ var (
 // Point represents... actually a line segment, I'm great at this.
 type Point struct {
 	pixel.Vec
-	Flags   int
-	H, S, V int16 // 0-360, 0-255, 0-255
+	Flags int
+	Color int16
 }
 
 func (p Point) String() string {
-	return fmt.Sprintf("%.3f, %.3f, 0x%03x, %d/%d/%d", p.X, p.Y, p.Flags, p.H, p.S, p.V)
+	return fmt.Sprintf("%.3f, %.3f, 0x%03x, %d", p.X, p.Y, p.Flags, p.Color)
 }
 
 // Fractal represents both the underlying data and the current rendered state,
@@ -78,6 +76,7 @@ type RenderData struct {
 	data          []Point
 	lines         [][]Point
 	Bounds        pixel.Rect
+	colorTab      []pixel.RGBA
 }
 
 // Changed causes re-rendering of a fractal.
@@ -213,6 +212,18 @@ func NewFractal(base []Point, maxOOM uint) *Fractal {
 	f.data[0] = Point{Vec: pixel.Vec{X: 1, Y: 0}}
 	// this will be capped by MaxOOM
 	f.Depth = 1
+	f.colorTab = make([]pixel.RGBA, 1024)
+	for i := range f.colorTab {
+		h := int16((i * 360) / 1024)
+		s := int16(255)
+		v := int16(255)
+		r, g, b := rgb(h, s, v)
+		f.colorTab[i] = pixel.RGBA{R: float64(r) / 255, G: float64(g) / 255, B: float64(b) / 255, A: 1}
+		// if i % 64 == 0 {
+		//	fmt.Printf("%d: %d, %d, %d => %d, %d, %d\n",
+		//		i, int(h), int(s), int(v), int(r), int(g), int(b))
+		//}
+	}
 	f.Alloc()
 	jsonstr, err := json.Marshal(*f)
 	if err == nil {
@@ -227,6 +238,17 @@ func (f *Fractal) Toggle(flag int) {
 		return
 	}
 	f.Base[f.selectedPoint].Flags ^= flag
+	f.SelectPoint(f.selectedPoint)
+	f.Changed()
+}
+
+// ColorChange adds an amount to the innate color trait of the point.
+func (f *Fractal) ColorChange(amt int) {
+	if f.selectedPoint < 0 || f.selectedPoint >= len(f.Base) {
+		return
+	}
+	f.Base[f.selectedPoint].Color += int16(amt)
+	f.Base[f.selectedPoint].Color %= 1024
 	f.SelectPoint(f.selectedPoint)
 	f.Changed()
 }
@@ -260,7 +282,7 @@ func (f *Fractal) AddPoint() {
 // DelPoint deletes the currently selected point.
 func (f *Fractal) DelPoint() {
 	// cap size
-	if len(f.Base) < 2 || f.selectedPoint < 0 || f.selectedPoint > len(f.Base) {
+	if len(f.Base) < 3 || f.selectedPoint < 0 || f.selectedPoint > len(f.Base) {
 		return
 	}
 	newbase := make([]Point, len(f.Base)-1)
@@ -282,7 +304,7 @@ func (f *Fractal) Points(depth int) []Point {
 		return nil
 	}
 	if depth == 0 {
-		return []Point{Point{Vec: pixel.Vec{X: 1, Y: 0}, H: 0}}
+		return []Point{Point{Vec: pixel.Vec{X: 1, Y: 0}}}
 	}
 	return f.lines[depth]
 }
@@ -298,6 +320,11 @@ func (f *Fractal) Render(depth int) bool {
 		dest := f.lines[depth]
 		for i := range f.Base {
 			dest[i] = f.Base[i]
+			if dest[i].Flags&FixedC != 0 {
+				dest[i].Color = modPlus(dest[i].Color, 1024)
+			} else {
+				dest[i].Color = 0
+			}
 		}
 		if f.Depth < 1 {
 			f.Depth = 1
@@ -351,15 +378,10 @@ func (f *Fractal) Partial(p0 Point, p1 Point, dest []Point) {
 		}
 		dest[i] = p
 		dest[i].Vec = a.Project(p.Vec)
-		if p.Flags&FixedH == 0 {
-			dest[i].H = modPlus(p.H+p1.H, 360)
+		if p.Flags&FixedC == 0 {
+			dest[i].Color += p1.Color
 		}
-		if p.Flags&FixedS == 0 {
-			dest[i].S = satMod(p.S+p1.S, 256)
-		}
-		if p.Flags&FixedV == 0 {
-			dest[i].V = satMod(p.V+p1.V, 256)
-		}
+		dest[i].Color = modPlus(dest[i].Color, 1024)
 		dest[i].Flags ^= (p1.Flags & (FlipX | FlipY))
 		// fmt.Printf("... point %d: %v\n", i, dest[i])
 	}
@@ -461,9 +483,7 @@ func (f *Fractal) SelectPoint(index int) {
 		p.UIFlag("FlipY", FlipY)
 		p.UIFlag("Hide", Hide)
 		p.UIFlag("Prune", Prune)
-		p.UIFlag("FixH", FixedH)
-		p.UIFlag("FixS", FixedS)
-		p.UIFlag("FixV", FixedV)
+		p.UIFlag("FixC", FixedC)
 	} else {
 		f.selectedPoint = -1
 		grey := pixel.RGBA{R: 0.5, G: 0.5, B: 0.5, A: 1.0}
@@ -471,9 +491,7 @@ func (f *Fractal) SelectPoint(index int) {
 		UIElements["FlipY"].SetColor(grey)
 		UIElements["Hide"].SetColor(grey)
 		UIElements["Prune"].SetColor(grey)
-		UIElements["FixH"].SetColor(grey)
-		UIElements["FixS"].SetColor(grey)
-		UIElements["FixV"].SetColor(grey)
+		UIElements["FixC"].SetColor(grey)
 
 	}
 }
@@ -610,6 +628,7 @@ func button(at pixel.Vec, name string, callback func(), format string, args ...i
 	buttonDot.X += textSize.W() + 2
 	spriteBounds := textRenderer.Bounds()
 	sprite := pixel.NewSprite(buttonCanvas, spriteBounds)
+	at = textMatrix.Project(at)
 	// draw instruction will center on point, rather than originating at point
 	center := at.Add(spriteBounds.Size().Scaled(0.5))
 	UIElements[name] = &UIElement{
@@ -668,9 +687,9 @@ func run() {
 	fracPortRect := pixel.Rect{Min: pixel.Vec{X: margin, Y: margin}, Max: winScale.Scaled(canScale).Sub(pixel.Vec{X: margin, Y: margin})}
 	fracPortScale := int32(0)
 	base := []Point{
-		Point{pixel.Vec{X: 0.05, Y: 0.25}, FixedS | FixedV, 320, 255, 255},
-		Point{pixel.Vec{X: 0.95, Y: -0.25}, FixedS | FixedV, 0, 255, 255},
-		Point{pixel.Vec{X: 1, Y: 0}, FixedS | FixedV, 40, 255, 255},
+		Point{pixel.Vec{X: 0.05, Y: 0.25}, 0, 0},
+		Point{pixel.Vec{X: 0.95, Y: -0.25}, 0, 128},
+		Point{pixel.Vec{X: 1, Y: 0}, 0, 256},
 	}
 	frac = NewFractal(base, 18)
 	for i := 0; i < frac.MaxDepth; i++ {
@@ -700,16 +719,17 @@ func run() {
 	imd.SetMatrix(fracMatrix)
 
 	second := time.Tick(time.Second)
-
-	button(pixel.Vec{X: 10, Y: 650}, "AddPoint", func() { frac.AddPoint() }, "Del")
-	button(pixel.Vec{X: 60, Y: 650}, "DelPoint", func() { frac.DelPoint() }, "Add")
-	button(pixel.Vec{X: 10, Y: 70}, "FlipX", func() { frac.Toggle(FlipX) }, "FlipX")
-	button(pixel.Vec{X: 80, Y: 70}, "FlipY", func() { frac.Toggle(FlipY) }, "FlipY")
-	button(pixel.Vec{X: 10, Y: 90}, "Hide", func() { frac.Toggle(Hide) }, "Hide")
-	button(pixel.Vec{X: 80, Y: 90}, "Prune", func() { frac.Toggle(Prune) }, "Prune")
-	button(pixel.Vec{X: 10, Y: 50}, "FixH", func() { frac.Toggle(FixedH) }, "FixH")
-	button(pixel.Vec{X: 80, Y: 50}, "FixS", func() { frac.Toggle(FixedS) }, "FixS")
-	button(pixel.Vec{X: 10, Y: 30}, "FixV", func() { frac.Toggle(FixedV) }, "FixV")
+	button(pixel.Vec{X: 0, Y: 4}, "AddPoint", func() { frac.AddPoint() }, "Add")
+	button(pixel.Vec{X: 6, Y: 4}, "DelPoint", func() { frac.DelPoint() }, "Del")
+	button(pixel.Vec{X: 0, Y: 15}, "FlipX", func() { frac.Toggle(FlipX) }, "FlipX")
+	button(pixel.Vec{X: 8, Y: 15}, "FlipY", func() { frac.Toggle(FlipY) }, "FlipY")
+	button(pixel.Vec{X: 00, Y: 16}, "Hide", func() { frac.Toggle(Hide) }, "Hide")
+	button(pixel.Vec{X: 8, Y: 16}, "Prune", func() { frac.Toggle(Prune) }, "Prune")
+	button(pixel.Vec{X: 0, Y: 17}, "FixC", func() { frac.Toggle(FixedC) }, "FixC")
+	button(pixel.Vec{X: 0, Y: 8}, "<<", func() { frac.ColorChange(-16) }, "<<")
+	button(pixel.Vec{X: 3, Y: 8}, "<", func() { frac.ColorChange(-1) }, "<")
+	button(pixel.Vec{X: 5, Y: 8}, ">", func() { frac.ColorChange(1) }, ">")
+	button(pixel.Vec{X: 7, Y: 8}, ">>", func() { frac.ColorChange(16) }, ">>")
 	frac.SelectPoint(-1)
 
 	for !win.Closed() {
@@ -804,10 +824,12 @@ func run() {
 		uiBatch.Draw(win)
 		if frac.selectedPoint >= 0 {
 			p := frac.Base[frac.selectedPoint]
-			textAt(win, pixel.Vec{X: 0, Y: 4}, pixel.RGBA{R: .7, G: .7, B: .7, A: 1},
-				"Point: %d", frac.selectedPoint+1)
 			textAt(win, pixel.Vec{X: 0, Y: 5}, pixel.RGBA{R: .7, G: .7, B: .7, A: 1},
+				"Point: %d", frac.selectedPoint+1)
+			textAt(win, pixel.Vec{X: 0, Y: 6}, pixel.RGBA{R: .7, G: .7, B: .7, A: 1},
 				"X: %-+6.3f Y: %-+6.3f", p.X, p.Y)
+			col := modPlus(p.Color, 1024)
+			textAt(win, pixel.Vec{X: 0, Y: 7}, frac.colorTab[col], "Color: %d", p.Color)
 		}
 		textAt(win, pixel.Vec{X: 0, Y: 30}, pixel.RGBA{R: 1, G: 1, B: 1, A: 1},
 			"FPS: %d\n[%.1f avg %ds]", lastFPS, averageFPS, totalSeconds)
@@ -818,13 +840,12 @@ func run() {
 			imd.Clear()
 			points := frac.Points(i)
 			last := len(points) - 1
-			r, g, b := rgb(points[last].H, points[last].S, points[last].V)
-			imd.Color = pixel.RGBA{R: float64(r) / 255, G: float64(g) / 255, B: float64(b) / 255, A: 1}
+			imd.Color = frac.colorTab[points[last].Color]
 			imd.Push(pixel.Vec{})
+			imd.Color = frac.colorTab[points[0].Color]
 			imd.Push(points[0].Vec)
 			for j := 1; j < len(points); j++ {
-				r, g, b := rgb(points[j].H, points[j].S, points[j].V)
-				imd.Color = pixel.RGBA{R: float64(r) / 255, G: float64(g) / 255, B: float64(b) / 255, A: 1}
+				imd.Color = frac.colorTab[points[j].Color]
 				imd.Push(points[j].Vec)
 			}
 			imd.Line(2 / fracMatrix[0])
@@ -836,13 +857,14 @@ func run() {
 			line := frac.Points(1)
 			p := line[frac.selectedPoint]
 			imd.Clear()
-			r, g, b := rgb(p.H, p.S, p.V)
-			imd.Color = pixel.RGBA{R: float64(r) / 255, G: float64(g) / 255, B: float64(b) / 255, A: 1}
 			if frac.selectedPoint > 0 {
+				imd.Color = frac.colorTab[line[frac.selectedPoint-1].Color]
 				imd.Push(line[frac.selectedPoint-1].Vec)
 			} else {
+				imd.Color = frac.colorTab[line[len(line)-1].Color]
 				imd.Push(pixel.Vec{})
 			}
+			imd.Color = frac.colorTab[p.Color]
 			imd.Push(p.Vec)
 			imd.Line(6 / fracMatrix[0])
 			imd.Draw(can)
