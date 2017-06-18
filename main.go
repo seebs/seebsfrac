@@ -17,6 +17,8 @@ import (
 	"github.com/faiface/pixel/text"
 	"github.com/golang/freetype/truetype"
 
+	"github.com/sqweek/dialog"
+
 	"golang.org/x/image/font"
 )
 
@@ -511,6 +513,51 @@ func (f *Fractal) SelectPoint(index int) {
 	}
 }
 
+// Save attempts to export a fractal as JSON.
+func (f *Fractal) Save() {
+	jsonstr, err := json.Marshal(*f)
+	if err != nil {
+		fmt.Printf("json: %s\n", err)
+		return
+	}
+	filename, err := dialog.File().Filter("Fractals", "frac").Title("Save Fractal").Save()
+	if err != nil {
+		fmt.Printf("file select: %s\n", err)
+		return
+	}
+	file, err := os.Create(filename)
+	if err != nil {
+		fmt.Printf("file create: %s\n", err)
+		return
+	}
+	file.Write(jsonstr)
+	file.WriteString("\n")
+	file.Close()
+	fmt.Printf("file saved?\n")
+}
+
+// Load attempts to load a fractal from a saved file.
+func (f *Fractal) Load() {
+	filename, err := dialog.File().Filter("Fractals", "frac").Title("Load Fractal").Load()
+	if err != nil {
+		fmt.Printf("err: %s\n", err)
+		return
+	}
+	bytes, err := ioutil.ReadFile(filename)
+	if err != nil {
+		fmt.Printf("file read: %s\n", err)
+		return
+	}
+	var temp Fractal
+	err = json.Unmarshal(bytes, &temp)
+	if err != nil {
+		fmt.Printf("json read: %s\n", err)
+		return
+	}
+	f.Base = temp.Base
+	f.Alloc()
+}
+
 func init() {
 	var err error
 
@@ -751,10 +798,11 @@ func run() {
 
 	imd := imdraw.New(nil)
 	imd.SetMatrix(fracMatrix)
+	button(pixel.Vec{X: 0, Y: 30}, "Save", func() { frac.Save() }, "Save")
+	button(pixel.Vec{X: 5, Y: 30}, "Load", func() { frac.Load() }, "Load")
 
-	second := time.Tick(time.Second)
-	button(pixel.Vec{X: 0, Y: 4}, "AddPoint", func() { frac.AddPoint() }, "Add")
-	button(pixel.Vec{X: 6, Y: 4}, "DelPoint", func() { frac.DelPoint() }, "Del")
+	pointElements = append(pointElements, button(pixel.Vec{X: 0, Y: 4}, "AddPoint", func() { frac.AddPoint() }, "Add"))
+	pointElements = append(pointElements, button(pixel.Vec{X: 6, Y: 4}, "DelPoint", func() { frac.DelPoint() }, "Del"))
 	pointElements = append(pointElements, button(pixel.Vec{X: 0, Y: 15}, "FlipX", func() { frac.Toggle(FlipX) }, "FlipX"))
 	pointElements = append(pointElements, button(pixel.Vec{X: 8, Y: 15}, "FlipY", func() { frac.Toggle(FlipY) }, "FlipY"))
 	pointElements = append(pointElements, button(pixel.Vec{X: 00, Y: 16}, "Hide", func() { frac.Toggle(Hide) }, "Hide"))
@@ -765,11 +813,13 @@ func run() {
 	pointElements = append(pointElements, button(pixel.Vec{X: 5, Y: 9}, ">", func() { frac.ColorChange(1) }, ">"))
 	pointElements = append(pointElements, button(pixel.Vec{X: 7, Y: 9}, ">>", func() { frac.ColorChange(16) }, ">>"))
 	pointElements = append(pointElements, button(pixel.Vec{X: 10, Y: 6}, "+X", func() { frac.XChange(-.005) }, "<"))
-	pointElements = append(pointElements, button(pixel.Vec{X: 12, Y: 6}, "-X", func() { frac.XChange(.005) }, ">"))
+	pointElements = append(pointElements, button(pixel.Vec{X: 12, Y: 6}, "-X", func() { frac.XChange(0.005) }, ">"))
 	pointElements = append(pointElements, button(pixel.Vec{X: 10, Y: 7}, "+Y", func() { frac.YChange(-.005) }, "<"))
 	pointElements = append(pointElements, button(pixel.Vec{X: 12, Y: 7}, "-Y", func() { frac.YChange(.005) }, ">"))
+
 	frac.SelectPoint(-1)
 
+	second := time.Tick(time.Second)
 	for !win.Closed() {
 		scrolled := win.MouseScroll()
 		mousePos := win.MousePosition()
@@ -873,7 +923,7 @@ func run() {
 			col := modPlus(p.Color, 1024)
 			textAt(win, pixel.Vec{X: 0, Y: 8}, frac.colorTab[col], "Color: %d", p.Color)
 		}
-		textAt(win, pixel.Vec{X: 0, Y: 30}, pixel.RGBA{R: 1, G: 1, B: 1, A: 1},
+		textAt(win, pixel.Vec{X: 0, Y: 32}, pixel.RGBA{R: 1, G: 1, B: 1, A: 1},
 			"FPS: %d\n[%.1f avg %ds]", lastFPS, averageFPS, totalSeconds)
 		can.Clear(pixel.RGBA{R: 0, G: 0, B: 0, A: 255})
 		can.Draw(win, canMatrix)
