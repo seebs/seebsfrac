@@ -31,6 +31,10 @@ const (
 	FixedC
 )
 
+const (
+	debuggingPrunes = 0
+)
+
 // Mouse activity states. A button starts out Unpressed, then is Pressed,
 // may experience Dragging, and is either Unpressed (event cancelled) or
 // Released (callback happens).
@@ -195,7 +199,9 @@ func (f *Fractal) Alloc() {
 			nprunes--
 		}
 	}
-	fmt.Printf("Base len %d: %d pruned, %d non-pruned.", baseLen, prunes, nprunes)
+	if debuggingPrunes != 0 {
+		fmt.Printf("Base len %d: %d pruned, %d non-pruned.", baseLen, prunes, nprunes)
+	}
 	// We start with one non-pruned line, which will produce
 	// one pruned point for each pruned point in base, and one
 	// non-pruned point for each non-pruned point in base.
@@ -205,10 +211,14 @@ func (f *Fractal) Alloc() {
 	// in base, and one non-pruned point for each non-pruned point in base.
 	for i := 0; i < f.MaxDepth; i++ {
 		total += npsize + psize
-		fmt.Printf("Depth %d: %d+%d points.", i, npsize, psize)
+		if debuggingPrunes != 0 {
+			fmt.Printf("Depth %d: %d+%d points.", i, npsize, psize)
+		}
 		psize += (npsize * prunes)
 		npsize *= nprunes
-		fmt.Printf(" Expecting %d+%d for next line.\n", npsize, psize)
+		if debuggingPrunes != 0 {
+			fmt.Printf(" Expecting %d+%d for next line.\n", npsize, psize)
+		}
 		totals[i] = total
 		// cap maxdepth
 		if total+psize+npsize > (1 << f.MaxOOM) {
@@ -398,15 +408,22 @@ func (f *Fractal) Render(depth int) bool {
 	prev := Point{}
 	pruned := 0
 	npruned := 0
+
 	for i := range src {
 		// fmt.Printf("rendering partial %d [%d:%d]\n", p, offset, offset + l)
 		if src[i].Flags&Prune == 0 {
-			p, np := f.Partial(prev, src[i], dest[offset:offset+l])
-			pruned, npruned = pruned+p, npruned+np
+			if debuggingPrunes != 0 {
+				p, np := f.Partial(prev, src[i], dest[offset:offset+l])
+				pruned, npruned = pruned+p, npruned+np
+			} else {
+				f.Partial(prev, src[i], dest[offset:offset+l])
+			}
 			offset += l
 		} else {
 			dest[offset] = src[i]
-			pruned++
+			if debuggingPrunes != 0 {
+				pruned++
+			}
 			offset++
 		}
 		prev = src[i]
