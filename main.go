@@ -282,7 +282,7 @@ func (f *Fractal) Points(depth int) []Point {
 		return nil
 	}
 	if depth == 0 {
-		return []Point{Point{Vec: pixel.Vec{X: 1, Y: 0}, H: 330}}
+		return []Point{Point{Vec: pixel.Vec{X: 1, Y: 0}, H: 0}}
 	}
 	return f.lines[depth]
 }
@@ -292,6 +292,16 @@ func (f *Fractal) Render(depth int) bool {
 	var src []Point
 	// the 0-depth case is already filled in, but we need to fix color for it
 	if depth == 0 {
+		return true
+	}
+	if depth == 1 {
+		dest := f.lines[depth]
+		for i := range f.Base {
+			dest[i] = f.Base[i]
+		}
+		if f.Depth < 1 {
+			f.Depth = 1
+		}
 		return true
 	}
 	if depth > 0 && depth < f.MaxDepth {
@@ -658,9 +668,9 @@ func run() {
 	fracPortRect := pixel.Rect{Min: pixel.Vec{X: margin, Y: margin}, Max: winScale.Scaled(canScale).Sub(pixel.Vec{X: margin, Y: margin})}
 	fracPortScale := int32(0)
 	base := []Point{
-		Point{pixel.Vec{X: 0.05, Y: 0.25}, FixedS | FixedV, 30, 255, 255},
-		Point{pixel.Vec{X: 0.95, Y: -0.25}, FixedS | FixedV, 30, 255, 255},
-		Point{pixel.Vec{X: 1, Y: 0}, FixedS | FixedV, 30, 255, 255},
+		Point{pixel.Vec{X: 0.05, Y: 0.25}, FixedS | FixedV, 320, 255, 255},
+		Point{pixel.Vec{X: 0.95, Y: -0.25}, FixedS | FixedV, 0, 255, 255},
+		Point{pixel.Vec{X: 1, Y: 0}, FixedS | FixedV, 40, 255, 255},
 	}
 	frac = NewFractal(base, 18)
 	for i := 0; i < frac.MaxDepth; i++ {
@@ -807,7 +817,8 @@ func run() {
 		for i := 1; i <= frac.Depth; i++ {
 			imd.Clear()
 			points := frac.Points(i)
-			r, g, b := rgb(points[0].H, points[0].S, points[0].V)
+			last := len(points) - 1
+			r, g, b := rgb(points[last].H, points[last].S, points[last].V)
 			imd.Color = pixel.RGBA{R: float64(r) / 255, G: float64(g) / 255, B: float64(b) / 255, A: 1}
 			imd.Push(pixel.Vec{})
 			imd.Push(points[0].Vec)
