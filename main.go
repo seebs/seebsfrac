@@ -242,13 +242,33 @@ func (f *Fractal) Toggle(flag int) {
 	f.Changed()
 }
 
-// ColorChange adds an amount to the innate color trait of the point.
+// ColorChange adds an amount to the color trait of the point.
 func (f *Fractal) ColorChange(amt int) {
 	if f.selectedPoint < 0 || f.selectedPoint >= len(f.Base) {
 		return
 	}
 	f.Base[f.selectedPoint].Color += int16(amt)
 	f.Base[f.selectedPoint].Color %= 1024
+	f.SelectPoint(f.selectedPoint)
+	f.Changed()
+}
+
+// XChange adds an amount to the innate color trait of the point.
+func (f *Fractal) XChange(amt float64) {
+	if f.selectedPoint < 0 || f.selectedPoint >= len(f.Base) {
+		return
+	}
+	f.Base[f.selectedPoint].X += amt
+	f.SelectPoint(f.selectedPoint)
+	f.Changed()
+}
+
+// XChange adds an amount to the innate color trait of the point.
+func (f *Fractal) YChange(amt float64) {
+	if f.selectedPoint < 0 || f.selectedPoint >= len(f.Base) {
+		return
+	}
+	f.Base[f.selectedPoint].Y += amt
 	f.SelectPoint(f.selectedPoint)
 	f.Changed()
 }
@@ -484,15 +504,10 @@ func (f *Fractal) SelectPoint(index int) {
 		p.UIFlag("Hide", Hide)
 		p.UIFlag("Prune", Prune)
 		p.UIFlag("FixC", FixedC)
+		pointElements.SetHidden(false)
 	} else {
 		f.selectedPoint = -1
-		grey := pixel.RGBA{R: 0.5, G: 0.5, B: 0.5, A: 1.0}
-		UIElements["FlipX"].SetColor(grey)
-		UIElements["FlipY"].SetColor(grey)
-		UIElements["Hide"].SetColor(grey)
-		UIElements["Prune"].SetColor(grey)
-		UIElements["FixC"].SetColor(grey)
-
+		pointElements.SetHidden(true)
 	}
 }
 
@@ -526,7 +541,11 @@ type UIElement struct {
 	dimmed    bool
 	state     int
 	enabled   bool
+	hidden    bool
 }
+
+// UIBatch is a set of related UI elements, for purposes like hiding/not-hiding.
+type UIBatch []*UIElement
 
 // UIElements is the set of UI elements, and shouldn't be exported.
 var (
@@ -534,6 +553,7 @@ var (
 	buttonCanvas     *pixelgl.Canvas
 	buttonDot        pixel.Vec
 	UIElements       map[string]*UIElement
+	pointElements    UIBatch
 	uiBatch          *pixel.Batch
 )
 
@@ -584,6 +604,11 @@ func (u *UIElement) SetDimmed(state bool) {
 	u.Colorize()
 }
 
+// SetHidden determines whether or not to hide the element.
+func (u *UIElement) SetHidden(state bool) {
+	u.hidden = state
+}
+
 // Press handles the state transition to Pressed.
 func (u *UIElement) Press() {
 	u.SetDimmed(true)
@@ -603,7 +628,7 @@ func (u *UIElement) Release() {
 	u.callback()
 }
 
-func button(at pixel.Vec, name string, callback func(), format string, args ...interface{}) {
+func button(at pixel.Vec, name string, callback func(), format string, args ...interface{}) *UIElement {
 	descent := atlas.Descent()
 	if buttonCanvas == nil {
 		buttonCanvas = pixelgl.NewCanvas(pixel.Rect{Min: pixel.Vec{}, Max: pixel.Vec{X: buttonCanvasSize, Y: buttonCanvasSize}})
@@ -631,7 +656,7 @@ func button(at pixel.Vec, name string, callback func(), format string, args ...i
 	at = textMatrix.Project(at)
 	// draw instruction will center on point, rather than originating at point
 	center := at.Add(spriteBounds.Size().Scaled(0.5))
-	UIElements[name] = &UIElement{
+	btn := &UIElement{
 		enabled:   true,
 		color:     pixel.RGBA{R: 1, G: 1, B: 1, A: 1},
 		baseColor: pixel.RGBA{R: 1, G: 1, B: 1, A: 1},
@@ -641,6 +666,8 @@ func button(at pixel.Vec, name string, callback func(), format string, args ...i
 		matrix:    pixel.IM.Moved(center),
 		label:     label,
 	}
+	UIElements[name] = btn
+	return btn
 }
 
 func textAt(t pixel.Target, at pixel.Vec, color pixel.RGBA, format string, args ...interface{}) pixel.Rect {
@@ -657,6 +684,13 @@ func textAt(t pixel.Target, at pixel.Vec, color pixel.RGBA, format string, args 
 
 func (u UIElement) String() string {
 	return fmt.Sprintf("[%s]", u.label)
+}
+
+// SetHidden hides or unhides the elements in the batch.
+func (us UIBatch) SetHidden(state bool) {
+	for _, u := range us {
+		u.SetHidden(state)
+	}
 }
 
 func run() {
@@ -721,15 +755,19 @@ func run() {
 	second := time.Tick(time.Second)
 	button(pixel.Vec{X: 0, Y: 4}, "AddPoint", func() { frac.AddPoint() }, "Add")
 	button(pixel.Vec{X: 6, Y: 4}, "DelPoint", func() { frac.DelPoint() }, "Del")
-	button(pixel.Vec{X: 0, Y: 15}, "FlipX", func() { frac.Toggle(FlipX) }, "FlipX")
-	button(pixel.Vec{X: 8, Y: 15}, "FlipY", func() { frac.Toggle(FlipY) }, "FlipY")
-	button(pixel.Vec{X: 00, Y: 16}, "Hide", func() { frac.Toggle(Hide) }, "Hide")
-	button(pixel.Vec{X: 8, Y: 16}, "Prune", func() { frac.Toggle(Prune) }, "Prune")
-	button(pixel.Vec{X: 0, Y: 17}, "FixC", func() { frac.Toggle(FixedC) }, "FixC")
-	button(pixel.Vec{X: 0, Y: 8}, "<<", func() { frac.ColorChange(-16) }, "<<")
-	button(pixel.Vec{X: 3, Y: 8}, "<", func() { frac.ColorChange(-1) }, "<")
-	button(pixel.Vec{X: 5, Y: 8}, ">", func() { frac.ColorChange(1) }, ">")
-	button(pixel.Vec{X: 7, Y: 8}, ">>", func() { frac.ColorChange(16) }, ">>")
+	pointElements = append(pointElements, button(pixel.Vec{X: 0, Y: 15}, "FlipX", func() { frac.Toggle(FlipX) }, "FlipX"))
+	pointElements = append(pointElements, button(pixel.Vec{X: 8, Y: 15}, "FlipY", func() { frac.Toggle(FlipY) }, "FlipY"))
+	pointElements = append(pointElements, button(pixel.Vec{X: 00, Y: 16}, "Hide", func() { frac.Toggle(Hide) }, "Hide"))
+	pointElements = append(pointElements, button(pixel.Vec{X: 8, Y: 16}, "Prune", func() { frac.Toggle(Prune) }, "Prune"))
+	pointElements = append(pointElements, button(pixel.Vec{X: 0, Y: 17}, "FixC", func() { frac.Toggle(FixedC) }, "FixC"))
+	pointElements = append(pointElements, button(pixel.Vec{X: 0, Y: 9}, "<<", func() { frac.ColorChange(-16) }, "<<"))
+	pointElements = append(pointElements, button(pixel.Vec{X: 3, Y: 9}, "<", func() { frac.ColorChange(-1) }, "<"))
+	pointElements = append(pointElements, button(pixel.Vec{X: 5, Y: 9}, ">", func() { frac.ColorChange(1) }, ">"))
+	pointElements = append(pointElements, button(pixel.Vec{X: 7, Y: 9}, ">>", func() { frac.ColorChange(16) }, ">>"))
+	pointElements = append(pointElements, button(pixel.Vec{X: 10, Y: 6}, "+X", func() { frac.XChange(-.005) }, "<"))
+	pointElements = append(pointElements, button(pixel.Vec{X: 12, Y: 6}, "-X", func() { frac.XChange(.005) }, ">"))
+	pointElements = append(pointElements, button(pixel.Vec{X: 10, Y: 7}, "+Y", func() { frac.YChange(-.005) }, "<"))
+	pointElements = append(pointElements, button(pixel.Vec{X: 12, Y: 7}, "-Y", func() { frac.YChange(.005) }, ">"))
 	frac.SelectPoint(-1)
 
 	for !win.Closed() {
@@ -819,7 +857,9 @@ func run() {
 			"Points: %d", frac.Total)
 		uiBatch.Clear()
 		for _, e := range UIElements {
-			e.sprite.DrawColorMask(uiBatch, e.matrix, e.color)
+			if !e.hidden {
+				e.sprite.DrawColorMask(uiBatch, e.matrix, e.color)
+			}
 		}
 		uiBatch.Draw(win)
 		if frac.selectedPoint >= 0 {
@@ -827,9 +867,11 @@ func run() {
 			textAt(win, pixel.Vec{X: 0, Y: 5}, pixel.RGBA{R: .7, G: .7, B: .7, A: 1},
 				"Point: %d", frac.selectedPoint+1)
 			textAt(win, pixel.Vec{X: 0, Y: 6}, pixel.RGBA{R: .7, G: .7, B: .7, A: 1},
-				"X: %-+6.3f Y: %-+6.3f", p.X, p.Y)
+				"X: %-+6.3f", p.X)
+			textAt(win, pixel.Vec{X: 0, Y: 7}, pixel.RGBA{R: .7, G: .7, B: .7, A: 1},
+				"Y: %-+6.3f", p.Y)
 			col := modPlus(p.Color, 1024)
-			textAt(win, pixel.Vec{X: 0, Y: 7}, frac.colorTab[col], "Color: %d", p.Color)
+			textAt(win, pixel.Vec{X: 0, Y: 8}, frac.colorTab[col], "Color: %d", p.Color)
 		}
 		textAt(win, pixel.Vec{X: 0, Y: 30}, pixel.RGBA{R: 1, G: 1, B: 1, A: 1},
 			"FPS: %d\n[%.1f avg %ds]", lastFPS, averageFPS, totalSeconds)
