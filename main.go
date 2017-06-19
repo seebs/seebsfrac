@@ -428,7 +428,7 @@ func (f *Fractal) Render(depth int) bool {
 		}
 		prev = src[i]
 	}
-	if f.verbose {
+	if f.verbose && debuggingPrunes != 0 {
 		fmt.Printf("Depth %d: Actually generated %d non-pruned, %d pruned.\n", depth, npruned, pruned)
 	}
 	nb := f.BoundsAt(depth)
