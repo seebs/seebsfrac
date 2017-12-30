@@ -180,10 +180,21 @@ func NewAffinesBetween(r0, r1 pixel.Rect) (to, from pixel.Matrix) {
 	return
 }
 
+// MaxOOMChange changes the Max Order of Magnitude, which controls MaxDepth
+func (f *Fractal) MaxOOMChange(delta int) {
+	newMaxOOM := int(f.MaxOOM) + delta
+	if newMaxOOM < 4 || newMaxOOM > 30 {
+		return
+	}
+	f.MaxOOM = uint(newMaxOOM)
+	f.data = make([]Point, 1<<f.MaxOOM, 1<<f.MaxOOM)
+	f.Alloc()
+}
+
 // Alloc reallocates the fractal's point/line storage, and should be needed
 // only when the number of points at each depth changes.
 func (f *Fractal) Alloc() {
-	f.MaxDepth = 20
+	f.MaxDepth = 30
 	totals := make([]int, f.MaxDepth)
 	total := 0
 	npsize := 1 // total set of non-pruned points in current line
@@ -230,7 +241,7 @@ func (f *Fractal) Alloc() {
 	prev := 0
 	fmt.Printf("%d points, %d depth, %d total size.\n", len(f.Base), f.MaxDepth, total)
 	for i := 0; i < f.MaxDepth; i++ {
-		// fmt.Printf("depth %d: %d to %d\n", i, prev, totals[i])
+		fmt.Printf("depth %d: %d to %d\n", i, prev, totals[i])
 		f.lines[i] = f.data[prev:totals[i]]
 		prev = totals[i]
 	}
@@ -769,7 +780,7 @@ func button(at pixel.Vec, name string, callback func(), format string, args ...i
 	sprite := pixel.NewSprite(buttonCanvas, spriteBounds)
 	at = textMatrix.Project(at)
 	// draw instruction will center on point, rather than originating at point
-	center := at.Add(spriteBounds.Size().Scaled(0.5))
+	center := at.Add(spriteBounds.Size().ScaledXY(pixel.Vec{X: 0.5, Y: 0.5})).Add(pixel.Vec{X: 0, Y: -descent})
 	btn := &UIElement{
 		enabled:   true,
 		color:     pixel.RGBA{R: 1, G: 1, B: 1, A: 1},
@@ -868,8 +879,8 @@ func run() {
 	button(pixel.Vec{X: 0, Y: 30}, "Save", func() { frac.Save() }, "Save")
 	button(pixel.Vec{X: 5, Y: 30}, "Load", func() { frac.Load() }, "Load")
 
-	pointElements = append(pointElements, button(pixel.Vec{X: 0, Y: 4}, "AddPoint", func() { frac.AddPoint() }, "Add"))
-	pointElements = append(pointElements, button(pixel.Vec{X: 6, Y: 4}, "DelPoint", func() { frac.DelPoint() }, "Del"))
+	pointElements = append(pointElements, button(pixel.Vec{X: 8, Y: 4}, "AddPoint", func() { frac.AddPoint() }, "Add"))
+	pointElements = append(pointElements, button(pixel.Vec{X: 12, Y: 4}, "DelPoint", func() { frac.DelPoint() }, "Del"))
 	pointElements = append(pointElements, button(pixel.Vec{X: 0, Y: 15}, "FlipX", func() { frac.Toggle(FlipX) }, "FlipX"))
 	pointElements = append(pointElements, button(pixel.Vec{X: 8, Y: 15}, "FlipY", func() { frac.Toggle(FlipY) }, "FlipY"))
 	pointElements = append(pointElements, button(pixel.Vec{X: 00, Y: 16}, "Hide", func() { frac.Toggle(Hide) }, "Hide"))
@@ -883,6 +894,9 @@ func run() {
 	pointElements = append(pointElements, button(pixel.Vec{X: 12, Y: 6}, "-X", func() { frac.XChange(0.005) }, ">"))
 	pointElements = append(pointElements, button(pixel.Vec{X: 10, Y: 7}, "+Y", func() { frac.YChange(-.005) }, "<"))
 	pointElements = append(pointElements, button(pixel.Vec{X: 12, Y: 7}, "-Y", func() { frac.YChange(.005) }, ">"))
+
+	button(pixel.Vec{X: 13, Y: 3}, "-MaxOOM", func() { frac.MaxOOMChange(-1) }, "-")
+	button(pixel.Vec{X: 14, Y: 3}, "+MaxOOM", func() { frac.MaxOOMChange(1) }, "+")
 
 	frac.SelectPoint(-1)
 
@@ -972,6 +986,10 @@ func run() {
 			"Depth: %d/%d", frac.Depth, frac.MaxDepth-1)
 		textAt(win, pixel.Vec{X: 0, Y: 2}, pixel.RGBA{R: 1, G: 1, B: 1, A: 1},
 			"Points: %d", frac.Total)
+		textAt(win, pixel.Vec{X: 0, Y: 3}, pixel.RGBA{R: .7, G: .7, B: .7, A: 1},
+			"Max: %d", 1<<frac.MaxOOM)
+		textAt(win, pixel.Vec{X: 0, Y: 4}, pixel.RGBA{R: 1, G: 1, B: 1, A: 1},
+			"Len: %d", len(frac.Base))
 		uiBatch.Clear()
 		for _, e := range UIElements {
 			if !e.hidden {
